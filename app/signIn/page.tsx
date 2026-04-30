@@ -4,15 +4,17 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { signIn, signOut } from "aws-amplify/auth";
+import { HiEye, HiEyeOff } from "react-icons/hi";
 
 export default function SignIn() {
   const router = useRouter();
   const [email, setEmail] = useState<string>("");
   const [password, setPassword] = useState<string>("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string>("");
   const [loading, setLoading] = useState(false);
 
-  async function formSubmit(e: React.FormEvent) {
+  async function formSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError("");
     setLoading(true);
@@ -32,7 +34,7 @@ export default function SignIn() {
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <h1 className="text-gray-900 font-bold text-4xl mb-1 tracking-tight">trim</h1>
-          <p className="text-gray-500 text-sm">シンプルに、つながる。</p>
+          <p className="text-gray-500 text-sm">シンプルに、きりとる。</p>
         </div>
 
         <div className="border border-gray-200 rounded-2xl p-6 shadow-sm">
@@ -44,21 +46,29 @@ export default function SignIn() {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="example@email.com"
                 autoComplete="email"
                 className="w-full bg-gray-50 border border-gray-200 rounded-lg px-4 py-3 text-gray-900 placeholder-gray-400 focus:outline-none focus:border-gray-500 transition-colors"
               />
             </div>
             <div>
               <label className="block text-gray-700 text-sm mb-1">パスワード</label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="パスワード"
-                autoComplete="current-password"
-                className="w-full bg-gray-50 border border-gray-200 rounded-lg px-4 py-3 text-gray-900 placeholder-gray-400 focus:outline-none focus:border-gray-500 transition-colors"
-              />
+              <div className="relative">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  autoComplete="current-password"
+                  className="w-full bg-gray-50 border border-gray-200 rounded-lg px-4 py-3 pr-11 text-gray-900 placeholder-gray-400 focus:outline-none focus:border-gray-500 transition-colors"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  className="absolute inset-y-0 right-3 flex items-center [background:none] text-gray-400 hover:text-gray-600"
+                  aria-label={showPassword ? "パスワードを隠す" : "パスワードを表示"}
+                >
+                  {showPassword ? <HiEyeOff size={20} /> : <HiEye size={20} />}
+                </button>
+              </div>
             </div>
             <div className="flex justify-end">
               <Link href="/resetPassword" className="text-xs text-gray-500 hover:text-gray-700">
