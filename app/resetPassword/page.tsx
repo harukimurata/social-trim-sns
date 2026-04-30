@@ -4,11 +4,7 @@ import { confirmResetPassword, resetPassword } from "aws-amplify/auth";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { EyeCloseIcon, EyeIcon } from "@/app/icons";
-import Label from "@/app/forms/Label";
-import Input from "@/app/forms/input/InputField";
-import Button from "@/app/components/ui/button/Button";
-import { useMsg } from "@/contexts/MsgContext";
+import { HiEye, HiEyeOff } from "react-icons/hi";
 
 export default function ResetPasswordPage() {
   const router = useRouter();
@@ -21,8 +17,8 @@ export default function ResetPasswordPage() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [confirmCode, setConfirmCode] = useState<string>("");
   const [errorText, setErrorText] = useState<string>("");
-
-  const { showMsg } = useMsg();
+  const [successText, setSuccessText] = useState<string>("");
+  const [loading, setLoading] = useState(false);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     switch (e.target.name) {
@@ -46,6 +42,7 @@ export default function ResetPasswordPage() {
         if (password !== confirmPassword) {
           throw new Error("パスワードが一致しません");
         }
+        setLoading(true);
         await confirmResetPassword({
           username: email,
           confirmationCode: confirmCode,
@@ -54,6 +51,8 @@ export default function ResetPasswordPage() {
         router.push("/signIn");
       } catch (error: unknown) {
         setErrorText(error instanceof Error ? error.message : "エラーが発生しました");
+      } finally {
+        setLoading(false);
       }
     } else {
       setErrorText("すべての項目を入力してください");
@@ -62,12 +61,16 @@ export default function ResetPasswordPage() {
 
   async function sendConfirmCode(e: React.FormEvent) {
     e.preventDefault();
+    setErrorText("");
     if (email) {
       try {
+        setLoading(true);
         await resetPassword({ username: email });
         setIsSendCode(true);
       } catch (error: unknown) {
         setErrorText(error instanceof Error ? error.message : "エラーが発生しました");
+      } finally {
+        setLoading(false);
       }
     }
   }
@@ -76,99 +79,104 @@ export default function ResetPasswordPage() {
     if (email) {
       try {
         await resetPassword({ username: email });
-        showMsg("認証コードの再発行", "登録したメールアドレス宛に送信しました。", "閉じる", "info");
+        setSuccessText("認証コードを再送しました。メールをご確認ください。");
       } catch (error: unknown) {
         setErrorText(error instanceof Error ? error.message : "エラーが発生しました");
       }
     }
   }
 
+  const inputClass =
+    "w-full bg-gray-50 border border-gray-200 rounded-lg px-4 py-3 text-gray-900 placeholder-gray-400 focus:outline-none focus:border-gray-500 transition-colors";
+
   if (isSendCode) {
     return (
-      <div className="flex flex-col min-h-screen">
-        <div className="flex flex-col justify-center flex-1 w-full max-w-md mx-auto px-4">
-          <div>
-            <div className="mb-5 sm:mb-8">
-              <h1 className="mb-2 font-semibold text-gray-800 text-title-sm dark:text-white/90 sm:text-title-md">
-                パスワードを再設定
-              </h1>
-            </div>
-            <form onSubmit={formSubmit}>
-              <div className="space-y-6">
-                <div>
-                  <Label>
-                    認証コード <span className="text-error-500">*</span>
-                  </Label>
-                  <Input
-                    name="confirmCode"
-                    placeholder="******"
-                    value={confirmCode}
-                    onChange={handleChange}
-                    autoComplete="one-time-code"
-                  />
-                </div>
-                <div>
-                  <Label>
-                    新しいパスワード <span className="text-error-500">*</span>
-                  </Label>
-                  <div className="relative">
-                    <Input
-                      name="password"
-                      type={showPassword ? "text" : "password"}
-                      placeholder="パスワード"
-                      value={password}
-                      onChange={handleChange}
-                      autoComplete="new-password"
-                    />
-                    <span
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute z-30 -translate-y-1/2 cursor-pointer right-4 top-1/2"
-                    >
-                      {showPassword ? (
-                        <EyeIcon className="fill-gray-500 dark:fill-gray-400 size-5" />
-                      ) : (
-                        <EyeCloseIcon className="fill-gray-500 dark:fill-gray-400 size-5" />
-                      )}
-                    </span>
-                  </div>
-                </div>
-                <div>
-                  <Label>
-                    新しいパスワード（確認） <span className="text-error-500">*</span>
-                  </Label>
-                  <div className="relative">
-                    <Input
-                      name="confirmPassword"
-                      type={showConfirmPassword ? "text" : "password"}
-                      placeholder="パスワード"
-                      value={confirmPassword}
-                      onChange={handleChange}
-                      autoComplete="new-password"
-                    />
-                    <span
-                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                      className="absolute z-30 -translate-y-1/2 cursor-pointer right-4 top-1/2"
-                    >
-                      {showConfirmPassword ? (
-                        <EyeIcon className="fill-gray-500 dark:fill-gray-400 size-5" />
-                      ) : (
-                        <EyeCloseIcon className="fill-gray-500 dark:fill-gray-400 size-5" />
-                      )}
-                    </span>
-                  </div>
-                </div>
-                {errorText && (
-                  <p className="mt-2 text-sm text-red-600 dark:text-red-500">{errorText}</p>
-                )}
-                <Button className="w-full" size="sm" type="submit">
-                  パスワードを再設定
-                </Button>
+      <div className="min-h-screen bg-white flex flex-col items-center justify-center px-4 py-8">
+        <div className="w-full max-w-sm">
+          <div className="text-center mb-8">
+            <h1 className="text-gray-900 font-bold text-4xl mb-1 tracking-tight">trim</h1>
+            <p className="text-gray-500 text-sm">シンプルに、きりとる。</p>
+          </div>
+
+          <div className="border border-gray-200 rounded-2xl p-6 shadow-sm">
+            <h2 className="text-gray-900 font-bold text-lg mb-6">パスワードを再設定</h2>
+            <form onSubmit={formSubmit} className="space-y-4">
+              <div>
+                <label className="block text-gray-700 text-sm mb-1">認証コード</label>
+                <input
+                  name="confirmCode"
+                  placeholder="******"
+                  value={confirmCode}
+                  onChange={handleChange}
+                  autoComplete="one-time-code"
+                  className={inputClass}
+                />
               </div>
+              <div>
+                <label className="block text-gray-700 text-sm mb-1">新しいパスワード</label>
+                <div className="relative">
+                  <input
+                    name="password"
+                    type={showPassword ? "text" : "password"}
+                    placeholder="パスワード"
+                    value={password}
+                    onChange={handleChange}
+                    autoComplete="new-password"
+                    className={`${inputClass} pr-11`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((v) => !v)}
+                    className="absolute inset-y-0 right-3 flex items-center [background:none] text-gray-400 hover:text-gray-600"
+                    aria-label={showPassword ? "パスワードを隠す" : "パスワードを表示"}
+                  >
+                    {showPassword ? <HiEyeOff size={20} /> : <HiEye size={20} />}
+                  </button>
+                </div>
+              </div>
+              <div>
+                <label className="block text-gray-700 text-sm mb-1">新しいパスワード（確認）</label>
+                <div className="relative">
+                  <input
+                    name="confirmPassword"
+                    type={showConfirmPassword ? "text" : "password"}
+                    placeholder="パスワード"
+                    value={confirmPassword}
+                    onChange={handleChange}
+                    autoComplete="new-password"
+                    className={`${inputClass} pr-11`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword((v) => !v)}
+                    className="absolute inset-y-0 right-3 flex items-center [background:none] text-gray-400 hover:text-gray-600"
+                    aria-label={showConfirmPassword ? "パスワードを隠す" : "パスワードを表示"}
+                  >
+                    {showConfirmPassword ? <HiEyeOff size={20} /> : <HiEye size={20} />}
+                  </button>
+                </div>
+              </div>
+              {errorText && <p className="text-sm text-red-600 text-center">{errorText}</p>}
+              {successText && <p className="text-sm text-green-600 text-center">{successText}</p>}
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full bg-gray-900 hover:bg-gray-700 text-white font-bold py-3 rounded-lg transition-colors disabled:opacity-50"
+              >
+                {loading ? "処理中..." : "パスワードを再設定"}
+              </button>
             </form>
-            <Button className="w-full mt-2" size="sm" onClick={resendConfirmCode}>
+          </div>
+
+          <div className="text-center mt-4 space-y-2">
+            <button
+              type="button"
+              onClick={resendConfirmCode}
+              className="block w-full text-gray-600 hover:text-gray-900 text-sm"
+            >
               認証コードを再送信
-            </Button>
-            <Link href="/signIn" className="text-sm text-brand-500 hover:text-brand-600 dark:text-brand-400">
+            </button>
+            <Link href="/signIn" className="text-gray-600 hover:text-gray-900 text-sm">
               サインインに戻る
             </Link>
           </div>
@@ -178,36 +186,41 @@ export default function ResetPasswordPage() {
   }
 
   return (
-    <div className="flex flex-col min-h-screen">
-      <div className="flex flex-col justify-center flex-1 w-full max-w-md mx-auto px-4">
-        <div>
-          <div className="mb-5 sm:mb-8">
-            <h1 className="mb-2 font-semibold text-gray-800 text-title-sm dark:text-white/90 sm:text-title-md">
-              パスワードを再設定
-            </h1>
-          </div>
-          <form onSubmit={sendConfirmCode}>
-            <div className="space-y-6">
-              <div>
-                <Label>
-                  メールアドレス <span className="text-error-500">*</span>
-                </Label>
-                <Input
-                  name="email"
-                  placeholder="info@gmail.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                />
-              </div>
-              {errorText && (
-                <p className="mt-2 text-sm text-red-600 dark:text-red-500">{errorText}</p>
-              )}
-              <Button className="w-full" size="sm" type="submit">
-                認証コードを送信
-              </Button>
+    <div className="min-h-screen bg-white flex flex-col items-center justify-center px-4 py-8">
+      <div className="w-full max-w-sm">
+        <div className="text-center mb-8">
+          <h1 className="text-gray-900 font-bold text-4xl mb-1 tracking-tight">trim</h1>
+          <p className="text-gray-500 text-sm">シンプルに、きりとる。</p>
+        </div>
+
+        <div className="border border-gray-200 rounded-2xl p-6 shadow-sm">
+          <h2 className="text-gray-900 font-bold text-lg mb-6">パスワードを再設定</h2>
+          <form onSubmit={sendConfirmCode} className="space-y-4">
+            <div>
+              <label className="block text-gray-700 text-sm mb-1">メールアドレス</label>
+              <input
+                type="email"
+                name="email"
+                placeholder="info@gmail.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                autoComplete="email"
+                className={inputClass}
+              />
             </div>
+            {errorText && <p className="text-sm text-red-600 text-center">{errorText}</p>}
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-gray-900 hover:bg-gray-700 text-white font-bold py-3 rounded-lg transition-colors disabled:opacity-50"
+            >
+              {loading ? "処理中..." : "認証コードを送信"}
+            </button>
           </form>
-          <Link href="/signIn" className="text-sm text-brand-500 hover:text-brand-600 dark:text-brand-400">
+        </div>
+
+        <div className="text-center mt-4">
+          <Link href="/signIn" className="text-gray-600 hover:text-gray-900 text-sm">
             サインインに戻る
           </Link>
         </div>

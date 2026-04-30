@@ -1,7 +1,10 @@
-@import url("https://fonts.googleapis.com/css2?family=Outfit:wght@100..900&display=swap")
-layer(base);
+@import url("https://fonts.googleapis.com/css2?family=Outfit:wght@100..900&display=swap") layer(base);
 
 @import "tailwindcss";
+@import "flowbite/src/themes/default";
+
+@source "../**/*.{tsx,ts,js,jsx}";
+@source "../node_modules/flowbite";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -155,9 +158,23 @@ layer(base);
   --z-index-9999: 9999;
   --z-index-99999: 99999;
   --z-index-999999: 999999;
+
+  /* Semantic tokens for UI components */
+  --color-heading: var(--color-gray-900);
+  --color-body: var(--color-gray-500);
+  --color-neutral-secondary-medium: var(--color-gray-50);
+  --color-default-medium: var(--color-gray-300);
+  --color-brand: var(--color-brand-500);
+  --color-brand-strong: var(--color-brand-700);
+  --color-brand-medium: var(--color-brand-200);
+  --color-brand-soft: var(--color-brand-100);
+  --color-fg-brand: var(--color-brand-600);
+
+  --radius-base: 8px;
 }
 
 @layer base {
+
   *,
   ::after,
   ::before,
@@ -165,10 +182,12 @@ layer(base);
   ::file-selector-button {
     border-color: var(--color-gray-200, currentColor);
   }
+
   button:not(:disabled),
   [role="button"]:not(:disabled) {
     cursor: pointer;
   }
+
   body {
     @apply relative font-normal font-outfit z-1 bg-black flex justify-center items-start;
   }
