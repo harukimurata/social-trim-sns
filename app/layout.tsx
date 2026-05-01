@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import "./app.css";
 import "./index.css";
 import { ConfigureAmplifyClientSide } from "./components/ConfigureAmplifyClientSide";
 import FlowbiteInit from "./components/FlowbiteInit";

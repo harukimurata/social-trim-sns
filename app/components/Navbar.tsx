@@ -17,11 +17,9 @@ export default function Navbar() {
               T
             </div>
           </button>
-          <a href="/" className="flex ms-2 md:me-24">
-            <span className="self-center text-lg font-semibold whitespace-nowrap text-heading">
-              trim
-            </span>
-          </a>
+          <span className="flex ms-2 md:me-24 self-center text-lg font-semibold whitespace-nowrap text-heading">
+            trim
+          </span>
         </div>
       </div>
     </nav>

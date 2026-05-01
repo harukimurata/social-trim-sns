@@ -57,7 +57,17 @@ export default function Sidebar() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
 
+  function closeSidebarOnMobile() {
+    if (typeof window !== "undefined" && window.innerWidth < 640) {
+      const toggleBtn = document.querySelector(
+        '[data-drawer-toggle="app-sidebar"]'
+      ) as HTMLElement;
+      toggleBtn?.click();
+    }
+  }
+
   async function handleSignOut() {
+    closeSidebarOnMobile();
     setLoading(true);
     try {
       await signOut();
@@ -79,6 +89,7 @@ export default function Sidebar() {
             <li key={item.href} className={item.hideOnTablet ? "md:block hidden" : ""}>
               <Link
                 href={item.href}
+                onClick={closeSidebarOnMobile}
                 className="flex items-center px-2 py-1.5 text-body rounded-base hover:bg-neutral-tertiary hover:text-fg-brand group"
               >
                 {item.icon}

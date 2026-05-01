@@ -13,6 +13,9 @@ const schema = a.schema({
       avatarUrl: a.string(),
       protectedPostCount: a.integer().default(0),
       totalPostCount: a.integer().default(0),
+      birthdate: a.date(),
+      mainUrl: a.string(),
+      mainArea: a.string(),
     })
     .identifier(["userId"])
     .secondaryIndexes((index) => [index("sequentialUserId")])
