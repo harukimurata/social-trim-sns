@@ -13,6 +13,9 @@ const schema = a.schema({
       avatarUrl: a.string(),
       protectedPostCount: a.integer().default(0),
       totalPostCount: a.integer().default(0),
+      birthdate: a.date(),
+      mainUrl: a.string(),
+      mainArea: a.string(),
     })
     .identifier(["userId"])
     .secondaryIndexes((index) => [index("sequentialUserId")])
@@ -110,6 +113,30 @@ const schema = a.schema({
     .identifier(["listId", "memberId"])
     .authorization((allow) => [
       allow.ownerDefinedIn("ownerId"),
+      allow.authenticated().to(["read"]),
+    ]),
+
+  // コメント (postId GSI で投稿別一覧、parentCommentId GSI で返信一覧を取得)
+  Comment: a
+    .model({
+      postId: a.string().required(),
+      // null = トップレベルコメント、値あり = 返信コメント
+      parentCommentId: a.string(),
+      userId: a.string().required(),
+      content: a.string().required(),
+      originalContent: a.string(),
+      isEdited: a.boolean().default(false),
+      imageUrls: a.string().array(),
+      favoriteCount: a.integer().default(0),
+      viralCount: a.integer().default(0),
+      createdAt: a.datetime(),
+    })
+    .secondaryIndexes((index) => [
+      index("postId").sortKeys(["createdAt"]),
+      index("parentCommentId").sortKeys(["createdAt"]),
+    ])
+    .authorization((allow) => [
+      allow.ownerDefinedIn("userId"),
       allow.authenticated().to(["read"]),
     ]),
 
