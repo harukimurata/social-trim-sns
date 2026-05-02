@@ -10,6 +10,7 @@ const client = generateClient<Schema>();
 
 type ProfileData = {
   userId: string;
+  sequentialUserId: number | null | undefined;
   username: string;
   bio: string | null | undefined;
   avatarUrl: string | null | undefined;
@@ -40,6 +41,7 @@ export default function ProfilePage() {
         if (data) {
           setProfile({
             userId: data.userId,
+            sequentialUserId: data.sequentialUserId,
             username: data.username,
             bio: data.bio,
             avatarUrl: data.avatarUrl,
@@ -169,6 +171,9 @@ export default function ProfilePage() {
 
         {!editing ? (
           <div>
+            {profile.sequentialUserId != null && (
+              <p className="text-xs text-gray-400 mb-0.5">ID: {profile.sequentialUserId}</p>
+            )}
             <p className="text-lg font-bold text-gray-500">{profile.username}</p>
             {profile.bio && (
               <p className="text-sm text-gray-500 mt-0.5 whitespace-pre-wrap">

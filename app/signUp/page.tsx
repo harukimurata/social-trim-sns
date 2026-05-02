@@ -53,7 +53,7 @@ export default function SignUp() {
       try {
         await signIn({ username: email, password });
         const { userId } = await getCurrentUser();
-        await client.models.User.create({ userId, username: name });
+        await client.models.User.update({ userId, username: name });
       } catch {
         router.push("/signIn");
         return;
