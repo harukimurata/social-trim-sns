@@ -8,6 +8,7 @@ import AppShell from "./components/AppShell";
 import { MsgProvider } from "@/contexts/MsgContext";
 import { AlertProvider } from "@/contexts/AlertContext";
 import { ModalProvider } from "./providers/ModalProvider";
+import { UserProvider } from "./providers/UserProvider";
 import DebugOverlay from "./components/debug/DebugOverlay";
 
 export const metadata: Metadata = {
@@ -29,9 +30,11 @@ export default function RootLayout({
         <ModalProvider>
           <AlertProvider>
             <MsgProvider>
-              <AppShell>{children}</AppShell>
-              <Alert />
-              <MsgModal />
+              <UserProvider>
+                <AppShell>{children}</AppShell>
+                <Alert />
+                <MsgModal />
+              </UserProvider>
             </MsgProvider>
           </AlertProvider>
         </ModalProvider>

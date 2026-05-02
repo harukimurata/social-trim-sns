@@ -2,6 +2,7 @@ import { defineBackend } from "@aws-amplify/backend";
 import { auth } from "./auth/resource.js";
 import { data } from "./data/resource.js";
 import { postConfirmation } from "./auth/post-confirmation/resource.js";
+import { storage } from "./storage/resource.js";
 import { Stack } from "aws-cdk-lib";
 import { Function as LambdaFunction } from "aws-cdk-lib/aws-lambda";
 import { StringParameter } from "aws-cdk-lib/aws-ssm";
@@ -11,6 +12,7 @@ const backend = defineBackend({
   auth,
   data,
   postConfirmation,
+  storage,
 });
 
 const { tables } = backend.data.resources;
