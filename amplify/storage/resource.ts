@@ -7,5 +7,9 @@ export const storage = defineStorage({
       allow.entity("identity").to(["read", "write", "delete"]),
       allow.authenticated.to(["read"]),
     ],
+    "posts/{entity_id}/*": [
+      allow.entity("identity").to(["read", "write", "delete"]),
+      allow.authenticated.to(["read"]),
+    ],
   }),
 });

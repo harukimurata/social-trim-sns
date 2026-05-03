@@ -2,9 +2,11 @@ import { defineBackend } from "@aws-amplify/backend";
 import { auth } from "./auth/resource.js";
 import { data } from "./data/resource.js";
 import { postConfirmation } from "./auth/post-confirmation/resource.js";
+import { postStreamHandler } from "./functions/post-stream-handler/resource.js";
 import { storage } from "./storage/resource.js";
-import { Stack } from "aws-cdk-lib";
-import { Function as LambdaFunction } from "aws-cdk-lib/aws-lambda";
+import { Stack, CfnResource } from "aws-cdk-lib";
+import { Function as LambdaFunction, CfnEventSourceMapping } from "aws-cdk-lib/aws-lambda";
+import { StreamViewType } from "aws-cdk-lib/aws-dynamodb";
 import { StringParameter } from "aws-cdk-lib/aws-ssm";
 import { PolicyStatement } from "aws-cdk-lib/aws-iam";
 
@@ -12,6 +14,7 @@ const backend = defineBackend({
   auth,
   data,
   postConfirmation,
+  postStreamHandler,
   storage,
 });
 
@@ -35,11 +38,12 @@ new StringParameter(dataStack, "UserTableNameSsm", {
   stringValue: tables["User"].tableName,
 });
 
-const lambda = backend.postConfirmation.resources.lambda as LambdaFunction;
+// ── post-confirmation Lambda ──────────────────────────────────────────────
+const confirmationLambda = backend.postConfirmation.resources.lambda as LambdaFunction;
 
 // ワイルドカード ARN を使うことで auth スタックから data スタックへの
 // CloudFormation クロススタック参照を作らない
-lambda.addToRolePolicy(
+confirmationLambda.addToRolePolicy(
   new PolicyStatement({
     actions: ["dynamodb:UpdateItem", "dynamodb:PutItem"],
     resources: [
@@ -49,7 +53,7 @@ lambda.addToRolePolicy(
   })
 );
 
-lambda.addToRolePolicy(
+confirmationLambda.addToRolePolicy(
   new PolicyStatement({
     actions: ["ssm:GetParameter"],
     resources: ["arn:aws:ssm:*:*:parameter/social-trim-sns/*"],
@@ -57,5 +61,62 @@ lambda.addToRolePolicy(
 );
 
 // SSM パスは静的な文字列として渡す（CloudFormation クロススタック参照なし）
-lambda.addEnvironment("COUNTER_TABLE_SSM_PATH", COUNTER_TABLE_SSM);
-lambda.addEnvironment("USER_TABLE_SSM_PATH", USER_TABLE_SSM);
+confirmationLambda.addEnvironment("COUNTER_TABLE_SSM_PATH", COUNTER_TABLE_SSM);
+confirmationLambda.addEnvironment("USER_TABLE_SSM_PATH", USER_TABLE_SSM);
+
+// ── post-stream-handler Lambda ────────────────────────────────────────────
+const streamLambda = backend.postStreamHandler.resources.lambda as LambdaFunction;
+
+// Amplify Gen 2 のテーブルは Custom::AmplifyDynamoDBTable カスタムリソース。
+// amplifyDynamoDbTables が公式エスケープハッチ（tables["Post"].node.defaultChild は undefined）。
+const { amplifyDynamoDbTables } = backend.data.resources.cfnResources;
+const postTableWrapper = amplifyDynamoDbTables["Post"];
+// NEW_AND_OLD_IMAGES に変更することでカスタムリソースの再実行を強制し、
+// Disabled になったストリームを新しい Enabled ストリームに置き換える。
+// INSERT イベントでは OldImage が null のため Lambda ハンドラーへの影響はない。
+postTableWrapper.streamSpecification = { streamViewType: StreamViewType.NEW_AND_OLD_IMAGES };
+
+// カスタムリソース Lambda が TableStreamArn を返すため getAtt で参照する
+const postCfnResource = (postTableWrapper as any).resource as CfnResource;
+
+// CfnEventSourceMapping をテーブルと同じスタック (dataStack) に置く。
+// Lambda スタックに置くと、データスタックの TableStreamArn エクスポートが
+// 古い Disabled ストリームを指したままで CfnEventSourceMapping が作成される
+// タイミング問題が発生するため、同一スタック内で依存関係を解決する。
+new CfnEventSourceMapping(Stack.of(postCfnResource), "PostStreamToLambda", {
+  functionName: streamLambda.functionArn,
+  eventSourceArn: postCfnResource.getAtt("TableStreamArn").toString(),
+  startingPosition: "LATEST",
+  filterCriteria: {
+    filters: [{ pattern: JSON.stringify({ eventName: ["INSERT"] }) }],
+  },
+});
+
+// ストリーム読み取り権限（ワイルドカード ARN でクロススタック CFn 参照を避ける）
+streamLambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: [
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:DescribeStream",
+      "dynamodb:ListStreams",
+    ],
+    resources: ["arn:aws:dynamodb:*:*:table/Post-*/stream/*"],
+  })
+);
+
+streamLambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ["dynamodb:UpdateItem"],
+    resources: ["arn:aws:dynamodb:*:*:table/User-*"],
+  })
+);
+
+streamLambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ["ssm:GetParameter"],
+    resources: ["arn:aws:ssm:*:*:parameter/social-trim-sns/*"],
+  })
+);
+
+streamLambda.addEnvironment("USER_TABLE_SSM_PATH", USER_TABLE_SSM);

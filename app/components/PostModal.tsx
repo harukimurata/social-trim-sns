@@ -6,6 +6,12 @@ import { FiImage } from "react-icons/fi";
 import { useAtomValue } from "jotai";
 import { avatarAtom } from "@/lib/atoms/avatarAtom";
 import PostContent from "./PostContent";
+import { generateClient } from "aws-amplify/data";
+import { getCurrentUser, fetchAuthSession } from "aws-amplify/auth";
+import { uploadData } from "aws-amplify/storage";
+import type { Schema } from "@/amplify/data/resource";
+
+const client = generateClient<Schema>();
 
 const MAX_TEXTS = 1000;
 const MAX_IMAGES = 20;
@@ -25,6 +31,9 @@ export default function PostModal({ isOpen, onClose }: Props) {
     Array(HASHTAG_SLOTS).fill("")
   );
   const [imagePreviews, setImagePreviews] = useState<string[]>([]);
+  const [imageFiles, setImageFiles] = useState<File[]>([]);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { initial, displayUrl } = useAtomValue(avatarAtom);
@@ -36,6 +45,7 @@ export default function PostModal({ isOpen, onClose }: Props) {
     } else {
       document.body.style.overflow = "";
       setTab("edit");
+      setError("");
     }
     return () => {
       document.body.style.overflow = "";
@@ -53,19 +63,66 @@ export default function PostModal({ isOpen, onClose }: Props) {
     const files = Array.from(e.target.files ?? []);
     const urls = files.map((f) => URL.createObjectURL(f));
     setImagePreviews((prev) => [...prev, ...urls].slice(0, MAX_IMAGES));
+    setImageFiles((prev) => [...prev, ...files].slice(0, MAX_IMAGES));
     e.target.value = "";
   };
 
   const removeImage = (index: number) => {
     setImagePreviews((prev) => prev.filter((_, i) => i !== index));
+    setImageFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const handleSubmit = () => {
-    // TODO: AppSync mutation で投稿を作成する
-    onClose();
+  const resetForm = () => {
     setContent("");
     setHashtags(Array(HASHTAG_SLOTS).fill(""));
+    imagePreviews.forEach((url) => URL.revokeObjectURL(url));
     setImagePreviews([]);
+    setImageFiles([]);
+    setError("");
+  };
+
+  const handleSubmit = async () => {
+    if (!content.trim() || submitting) return;
+    setSubmitting(true);
+    setError("");
+    try {
+      const { userId } = await getCurrentUser();
+      const session = await fetchAuthSession();
+      const identityId = session.identityId;
+      if (!identityId) throw new Error("identityId not found");
+
+      // 画像を S3 にアップロードしてパスを収集
+      const timestamp = Date.now();
+      const uploadedPaths = await Promise.all(
+        imageFiles.map(async (file, i) => {
+          const ext = file.name.split(".").pop() ?? "jpg";
+          const path = `posts/${identityId}/${timestamp}_${i}.${ext}`;
+          await uploadData({ path, data: file }).result;
+          return path;
+        })
+      );
+
+      const activeHashtags = hashtags.filter((h) => h.trim() !== "");
+      // TTL = 現在時刻 + 7日 (秒単位)
+      const ttl = Math.floor(Date.now() / 1000) + 7 * 24 * 60 * 60;
+
+      const { errors } = await client.models.Post.create({
+        userId,
+        content: content.trim(),
+        imageUrls: uploadedPaths.length > 0 ? uploadedPaths : undefined,
+        hashtags: activeHashtags.length > 0 ? activeHashtags : undefined,
+        ttl,
+      });
+
+      if (errors && errors.length > 0) throw new Error(errors[0].message);
+
+      resetForm();
+      onClose();
+    } catch {
+      setError("投稿に失敗しました。もう一度お試しください。");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -90,10 +147,10 @@ export default function PostModal({ isOpen, onClose }: Props) {
             <h2 className="text-sm font-bold text-gray-900">新しい投稿</h2>
             <button
               onClick={handleSubmit}
-              disabled={!content.trim()}
+              disabled={!content.trim() || submitting}
               className="bg-brand text-white text-sm font-semibold px-4 py-1.5 rounded-full disabled:opacity-40 hover:bg-brand-strong transition-colors"
             >
-              投稿
+              {submitting ? "投稿中..." : "投稿"}
             </button>
           </div>
 
@@ -199,6 +256,11 @@ export default function PostModal({ isOpen, onClose }: Props) {
             </>
           )}
         </div>
+
+        {/* エラー */}
+        {error && (
+          <p className="px-4 py-2 text-xs text-red-500 shrink-0">{error}</p>
+        )}
 
         {/* フッターツールバー（編集タブのみ表示） */}
         {tab === "edit" && (
