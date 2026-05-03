@@ -129,11 +129,11 @@ const schema = a.schema({
       imageUrls: a.string().array(),
       favoriteCount: a.integer().default(0),
       viralCount: a.integer().default(0),
-      createdAt: a.datetime(),
+      postedAt: a.datetime(),
     })
     .secondaryIndexes((index) => [
-      index("postId").sortKeys(["createdAt"]),
-      index("parentCommentId").sortKeys(["createdAt"]),
+      index("postId").sortKeys(["postedAt"]),
+      index("parentCommentId").sortKeys(["postedAt"]),
     ])
     .authorization((allow) => [
       allow.ownerDefinedIn("userId"),

@@ -1,6 +1,11 @@
 "use client";
 
+import { useAtomValue } from "jotai";
+import { avatarAtom } from "@/lib/atoms/avatarAtom";
+
 export default function Navbar() {
+  const { initial, displayUrl } = useAtomValue(avatarAtom);
+
   return (
     <nav className="fixed top-0 z-50 w-full bg-neutral-primary-soft border-b border-default">
       <div className="px-3 py-3 lg:px-5 lg:pl-3">
@@ -13,8 +18,13 @@ export default function Navbar() {
             className="md:hidden flex text-sm rounded-full focus:ring-4 focus:ring-neutral-tertiary me-2"
           >
             <span className="sr-only">サイドバーを開く</span>
-            <div className="w-8 h-8 rounded-full bg-brand-500 flex items-center justify-center text-white text-sm font-semibold">
-              T
+            <div className="w-8 h-8 rounded-full bg-brand-500 flex items-center justify-center text-white text-sm font-semibold overflow-hidden">
+              {displayUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={displayUrl} alt="アイコン" className="w-full h-full object-cover" />
+              ) : (
+                initial
+              )}
             </div>
           </button>
           <span className="flex ms-2 md:me-24 self-center text-lg font-semibold whitespace-nowrap text-heading">

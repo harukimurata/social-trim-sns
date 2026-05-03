@@ -1,15 +1,19 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { getCurrentUser } from "aws-amplify/auth";
+import { useState, useEffect, useRef } from "react";
+import { getCurrentUser, fetchAuthSession } from "aws-amplify/auth";
+import { uploadData, getUrl, remove } from "aws-amplify/storage";
 import { generateClient } from "aws-amplify/data";
 import type { Schema } from "@/amplify/data/resource";
-import { HiPencil } from "react-icons/hi";
+import { useSetAtom } from "jotai";
+import { avatarAtom } from "@/lib/atoms/avatarAtom";
+import { HiPencil, HiCamera, HiX } from "react-icons/hi";
 
 const client = generateClient<Schema>();
 
 type ProfileData = {
   userId: string;
+  sequentialUserId: number | null | undefined;
   username: string;
   bio: string | null | undefined;
   avatarUrl: string | null | undefined;
@@ -30,8 +34,16 @@ export default function ProfilePage() {
   const [editMainUrl, setEditMainUrl] = useState("");
   const [editMainArea, setEditMainArea] = useState("");
   const [saving, setSaving] = useState(false);
+  const [avatarDisplayUrl, setAvatarDisplayUrl] = useState("");
+  const setAvatar = useSetAtom(avatarAtom);
+  // 編集中の一時的なアバター状態
+  const [pendingAvatarFile, setPendingAvatarFile] = useState<File | null>(null);
+  const [pendingAvatarPreviewUrl, setPendingAvatarPreviewUrl] = useState("");
+  const [avatarClearRequested, setAvatarClearRequested] = useState(false);
   const [error, setError] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // マウント時にログイン中ユーザーのプロフィールを取得し、アバターのS3署名付きURLを解決する
   useEffect(() => {
     async function fetchProfile() {
       try {
@@ -40,6 +52,7 @@ export default function ProfilePage() {
         if (data) {
           setProfile({
             userId: data.userId,
+            sequentialUserId: data.sequentialUserId,
             username: data.username,
             bio: data.bio,
             avatarUrl: data.avatarUrl,
@@ -49,6 +62,11 @@ export default function ProfilePage() {
             mainUrl: data.mainUrl,
             mainArea: data.mainArea,
           });
+          // アバターが設定されている場合のみ署名付きURLを取得
+          if (data.avatarUrl) {
+            const { url } = await getUrl({ path: data.avatarUrl });
+            setAvatarDisplayUrl(url.toString());
+          }
         }
       } catch {
         setError("プロフィールの取得に失敗しました");
@@ -59,6 +77,7 @@ export default function ProfilePage() {
     fetchProfile();
   }, []);
 
+  // 編集モードへ切り替え、現在のプロフィール値をフォームの初期値にセットする
   function startEdit() {
     if (!profile) return;
     setEditUsername(profile.username ?? "");
@@ -70,13 +89,53 @@ export default function ProfilePage() {
     setEditing(true);
   }
 
+  // 編集をキャンセルし、未アップロードのプレビューURLを解放して状態をリセットする
   function cancelEdit() {
+    if (pendingAvatarPreviewUrl) URL.revokeObjectURL(pendingAvatarPreviewUrl);
+    setPendingAvatarFile(null);
+    setPendingAvatarPreviewUrl("");
+    setAvatarClearRequested(false);
     setEditing(false);
     setError("");
   }
 
+  // ファイル選択時はローカルプレビューのみ。実際のアップロードは saveProfile で行う。
+  function handleAvatarChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // 画像ファイル以外はエラー
+    if (!file.type.startsWith("image/")) {
+      setError("画像ファイルを選択してください");
+      return;
+    }
+    // 10MB超過はエラー
+    if (file.size > 10 * 1024 * 1024) {
+      setError("ファイルサイズは10MB以下にしてください");
+      return;
+    }
+
+    if (pendingAvatarPreviewUrl) URL.revokeObjectURL(pendingAvatarPreviewUrl);
+    setPendingAvatarFile(file);
+    setPendingAvatarPreviewUrl(URL.createObjectURL(file));
+    setAvatarClearRequested(false);
+    setError("");
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  // アバター削除フラグを立て、プレビューをクリアする（S3削除は saveProfile で行う）
+  function handleAvatarClear() {
+    if (pendingAvatarPreviewUrl) URL.revokeObjectURL(pendingAvatarPreviewUrl);
+    setPendingAvatarFile(null);
+    setPendingAvatarPreviewUrl("");
+    setAvatarClearRequested(true);
+    setError("");
+  }
+
+  // 編集内容をDBに保存し、必要に応じてS3のアバター画像をアップロード／削除する
   async function saveProfile() {
     if (!profile) return;
+    // ユーザー名は必須
     if (!editUsername.trim()) {
       setError("ユーザー名は必須です");
       return;
@@ -84,6 +143,31 @@ export default function ProfilePage() {
     setSaving(true);
     setError("");
     try {
+      // 新しい画像が選択されている場合はS3へアップロード
+      let newAvatarPath: string | undefined;
+      if (pendingAvatarFile) {
+        const session = await fetchAuthSession();
+        const identityId = session.identityId;
+        if (!identityId) throw new Error("identityId not found");
+
+        const ext = pendingAvatarFile.name.split(".").pop() ?? "jpg";
+        newAvatarPath = `avatars/${identityId}/avatar.${ext}`;
+        await uploadData({ path: newAvatarPath, data: pendingAvatarFile }).result;
+      }
+
+      // 削除フラグが立っており、既存アバターがある場合はS3から削除
+      if (avatarClearRequested && profile.avatarUrl) {
+        await remove({ path: profile.avatarUrl });
+      }
+
+      // アバター変更内容に応じてDB更新パッチを決定:
+      // 新画像あり → 新パス、削除フラグあり → null、変更なし → パッチなし
+      const avatarPatch = newAvatarPath
+        ? { avatarUrl: newAvatarPath }
+        : avatarClearRequested
+          ? { avatarUrl: null as null }
+          : {};
+
       const { data } = await client.models.User.update({
         userId: profile.userId,
         username: editUsername.trim(),
@@ -91,7 +175,25 @@ export default function ProfilePage() {
         birthdate: editBirthdate || null,
         mainUrl: editMainUrl.trim() || null,
         mainArea: editMainArea.trim() || null,
+        ...avatarPatch,
       });
+
+      // 表示用URLを更新し、Navbarにも反映
+      const newInitial = editUsername.trim()[0].toUpperCase();
+      if (newAvatarPath) {
+        // 新しいアバターを設定した場合
+        const { url } = await getUrl({ path: newAvatarPath });
+        setAvatarDisplayUrl(url.toString());
+        setAvatar({ initial: newInitial, displayUrl: url.toString() });
+      } else if (avatarClearRequested) {
+        // アバターを削除した場合
+        setAvatarDisplayUrl("");
+        setAvatar({ initial: newInitial, displayUrl: "" });
+      } else {
+        // アバター変更なし（イニシャルのみ更新）
+        setAvatar((prev) => ({ ...prev, initial: newInitial }));
+      }
+
       if (data) {
         setProfile((prev) =>
           prev
@@ -102,10 +204,20 @@ export default function ProfilePage() {
               birthdate: data.birthdate,
               mainUrl: data.mainUrl,
               mainArea: data.mainArea,
+              ...(newAvatarPath
+                ? { avatarUrl: newAvatarPath }
+                : avatarClearRequested
+                  ? { avatarUrl: null }
+                  : {}),
             }
             : prev
         );
       }
+
+      if (pendingAvatarPreviewUrl) URL.revokeObjectURL(pendingAvatarPreviewUrl);
+      setPendingAvatarFile(null);
+      setPendingAvatarPreviewUrl("");
+      setAvatarClearRequested(false);
       setEditing(false);
     } catch {
       setError("プロフィールの更新に失敗しました");
@@ -114,6 +226,7 @@ export default function ProfilePage() {
     }
   }
 
+  // データ取得中はローディング表示
   if (loading) {
     return (
       <main className="px-4 py-6">
@@ -122,6 +235,7 @@ export default function ProfilePage() {
     );
   }
 
+  // プロフィールが取得できなかった場合はエラー表示
   if (!profile) {
     return (
       <main className="px-4 py-6">
@@ -136,11 +250,21 @@ export default function ProfilePage() {
     ? profile.username[0].toUpperCase()
     : "?";
 
+  // 編集モード中のアバター表示: 選択済みプレビュー > 削除フラグ > 既存URL
+  const editingAvatarSrc = pendingAvatarPreviewUrl
+    ? pendingAvatarPreviewUrl
+    : avatarClearRequested
+      ? ""
+      : avatarDisplayUrl;
+  const currentAvatarSrc = editing ? editingAvatarSrc : avatarDisplayUrl;
+  const showClearButton = editing && !!editingAvatarSrc;
+
   return (
     <main className="px-4 py-6 max-w-lg">
       {/* ヘッダー */}
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-xl font-bold text-heading">プロフィール</h1>
+        {/* 閲覧モードのみ編集ボタンを表示 */}
         {!editing && (
           <button
             onClick={startEdit}
@@ -154,21 +278,59 @@ export default function ProfilePage() {
 
       {/* アバター + ユーザー名 */}
       <div className="flex items-center gap-4 mb-6">
-        <div className="w-20 h-20 rounded-full bg-brand-500 flex items-center justify-center text-white text-2xl font-bold overflow-hidden shrink-0">
-          {profile.avatarUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={profile.avatarUrl}
-              alt={profile.username}
-              className="w-full h-full object-cover"
-            />
-          ) : (
-            avatarInitial
+        <div className="relative shrink-0">
+          <div className="w-20 h-20 rounded-full bg-brand-500 flex items-center justify-center text-white text-2xl font-bold overflow-hidden">
+            {/* アバターURLがあれば画像、なければイニシャルを表示 */}
+            {currentAvatarSrc ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={currentAvatarSrc}
+                alt={profile.username}
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              avatarInitial
+            )}
+          </div>
+          {/* カメラボタン: 編集モードでホバー表示 */}
+          {editing && (
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={saving}
+              className="absolute inset-0 rounded-full flex items-center justify-center bg-black/40 text-white opacity-0 hover:opacity-100 transition-opacity disabled:cursor-not-allowed"
+              aria-label="アイコン画像を変更"
+            >
+              <HiCamera size={24} />
+            </button>
           )}
+          {/* 削除ボタン: 編集モードかつアバターが存在する場合に表示 */}
+          {showClearButton && (
+            <button
+              type="button"
+              onClick={handleAvatarClear}
+              disabled={saving}
+              className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-gray-700 text-white flex items-center justify-center hover:bg-gray-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              aria-label="アイコン画像を削除"
+            >
+              <HiX size={10} />
+            </button>
+          )}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={handleAvatarChange}
+          />
         </div>
 
+        {/* 閲覧モード: ユーザー名・bio表示 / 編集モード: ユーザー名入力フォーム */}
         {!editing ? (
           <div>
+            {profile.sequentialUserId != null && (
+              <p className="text-xs text-gray-400 mb-0.5">ID: {profile.sequentialUserId}</p>
+            )}
             <p className="text-lg font-bold text-gray-500">{profile.username}</p>
             {profile.bio && (
               <p className="text-sm text-gray-500 mt-0.5 whitespace-pre-wrap">
@@ -251,7 +413,7 @@ export default function ProfilePage() {
         </div>
       )}
 
-      {/* 誕生日 / メインURL / メインエリア（閲覧モード） */}
+      {/* 誕生日 / メインURL / メインエリア（閲覧モード）: いずれか1つでも値があれば表示 */}
       {!editing &&
         (profile.birthdate || profile.mainUrl || profile.mainArea) && (
           <div className="space-y-1.5 mb-6 text-sm text-gray-600">
