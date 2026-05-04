@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import MarkdownContent from "./MarkdownContent";
 import {
   HiOutlineStar,
   HiChevronLeft,
@@ -82,7 +83,7 @@ export default function PostContent({
 
   return (
     <div
-      className={`px-4 py-4 border-b border-gray-100 ${onPostClick ? "cursor-pointer hover:bg-gray-50 transition-colors" : ""}`}
+      className={`px-4 py-4 border-gray-100 ${onPostClick ? "cursor-pointer hover:bg-gray-50 transition-colors" : ""}`}
       onClick={onPostClick}
     >
       <div className="flex gap-3">
@@ -121,9 +122,9 @@ export default function PostContent({
           </div>
 
           {/* 本文（編集前/後で切り替え） */}
-          <p className="text-sm text-gray-800 whitespace-pre-wrap break-words leading-relaxed">
-            {displayContent}
-          </p>
+          <div className="text-sm text-gray-800 break-words leading-relaxed">
+            <MarkdownContent>{displayContent}</MarkdownContent>
+          </div>
 
           {/* 編集前/後 切り替えボタン */}
           {isEdited && originalContent && (

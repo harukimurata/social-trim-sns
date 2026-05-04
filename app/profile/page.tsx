@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import MarkdownContent from "@/app/components/MarkdownContent";
 import { getCurrentUser, fetchAuthSession } from "aws-amplify/auth";
 import { uploadData, getUrl, remove } from "aws-amplify/storage";
 import { generateClient } from "aws-amplify/data";
@@ -373,12 +374,12 @@ export default function ProfilePage() {
         prev.map((p) =>
           p.id === post.id
             ? {
-                ...p,
-                content: editPostContent.trim(),
-                originalContent: post.content,
-                isEdited: true,
-                ...ttlPatch,
-              }
+              ...p,
+              content: editPostContent.trim(),
+              originalContent: post.content,
+              isEdited: true,
+              ...ttlPatch,
+            }
             : p
         )
       );
@@ -718,11 +719,11 @@ export default function ProfilePage() {
                         )}
                       </div>
 
-                      <p className="text-sm text-gray-800 whitespace-pre-wrap break-words leading-relaxed">
-                        {showOriginalMap[post.id] && post.originalContent
+                      <div className="text-sm text-gray-800 whitespace-pre-wrap break-words leading-relaxed">
+                        <MarkdownContent>{showOriginalMap[post.id] && post.originalContent
                           ? post.originalContent
-                          : post.content}
-                      </p>
+                          : post.content}</MarkdownContent>
+                      </div>
 
                       {post.isEdited && post.originalContent && (
                         <button
@@ -756,11 +757,10 @@ export default function ProfilePage() {
                               protectingPostId === post.id ||
                               (!post.isProtected && (profile.protectedPostCount ?? 0) >= 5)
                             }
-                            className={`flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                              post.isProtected
-                                ? "border-blue-400 text-blue-500 hover:bg-blue-50"
-                                : "border-gray-300 text-gray-600 hover:bg-gray-50"
-                            }`}
+                            className={`flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${post.isProtected
+                              ? "border-blue-400 text-blue-500 hover:bg-blue-50"
+                              : "border-gray-300 text-gray-600 hover:bg-gray-50"
+                              }`}
                           >
                             {post.isProtected ? (
                               <HiLockClosed size={12} />
