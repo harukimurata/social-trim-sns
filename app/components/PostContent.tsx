@@ -244,7 +244,7 @@ export default function PostContent({
       {zoomedIndex !== null && (
         <div
           className="fixed inset-0 z-[60] bg-black flex items-center justify-center"
-          onClick={() => setZoomedIndex(null)}
+          onClick={(e) => { e.stopPropagation(); setZoomedIndex(null); }}
         >
           {/* 閉じるボタン（左上） */}
           <button
