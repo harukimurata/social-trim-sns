@@ -26,8 +26,13 @@
     "react": "^19",
     "react-dom": "^19",
     "react-hook-form": "^7.65.0",
+    "react-markdown": "^10.1.0",
+    "remark-breaks": "^4.0.0",
+    "remark-directive": "^4.0.0",
+    "remark-gfm": "^4.0.1",
     "tailwind-merge": "^3.3.1",
-    "ulid": "^2.4.0"
+    "ulid": "^2.4.0",
+    "unist-util-visit": "^5.1.0"
   },
   "devDependencies": {
     "@aws-amplify/backend": "^1.13.0",
