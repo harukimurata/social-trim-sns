@@ -10,6 +10,7 @@ import { CiBoxList } from "react-icons/ci";
 import { SiBuzzfeed } from "react-icons/si";
 import { IoMdNotifications } from "react-icons/io";
 import { PiSignOut } from "react-icons/pi";
+import styles from "./Sidebar.module.css";
 
 const iconClass = "shrink-0 w-5 h-5 transition duration-75 group-hover:text-fg-brand";
 
@@ -80,7 +81,7 @@ export default function Sidebar() {
   return (
     <aside
       id="app-sidebar"
-      className="fixed top-13 left-0 z-40 w-64 h-[calc(100vh-3rem)] transition-transform -translate-x-full sm:translate-x-0"
+      className={`fixed top-13 z-40 w-64 h-[calc(100vh-3rem)] transition-transform -translate-x-full sm:translate-x-0 ${styles.sidebar}`}
       aria-label="サイドバー"
     >
       <div className="h-full px-3 py-4 overflow-y-auto bg-neutral-primary-soft border-e border-default flex flex-col justify-between">

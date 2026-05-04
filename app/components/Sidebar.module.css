@@ -1,0 +1,3 @@
+.sidebar {
+    left: max(0px, calc((100vw - 1000px) / 2));
+}

@@ -19,7 +19,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <>
       <Navbar />
-      <div className="relative">
+      <div className="relative w-full max-w-[1000px]">
         <Sidebar />
         <div className="p-4 sm:ml-64 mt-14 pb-20 sm:pb-4">{children}</div>
       </div>
