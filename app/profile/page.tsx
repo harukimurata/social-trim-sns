@@ -19,6 +19,8 @@ type ProfileData = {
   avatarUrl: string | null | undefined;
   totalPostCount: number | null | undefined;
   protectedPostCount: number | null | undefined;
+  followingCount: number | null | undefined;
+  followerCount: number | null | undefined;
   birthdate: string | null | undefined;
   mainUrl: string | null | undefined;
   mainArea: string | null | undefined;
@@ -58,6 +60,8 @@ export default function ProfilePage() {
             avatarUrl: data.avatarUrl,
             totalPostCount: data.totalPostCount,
             protectedPostCount: data.protectedPostCount,
+            followingCount: data.followingCount,
+            followerCount: data.followerCount,
             birthdate: data.birthdate,
             mainUrl: data.mainUrl,
             mainArea: data.mainArea,
@@ -448,6 +452,18 @@ export default function ProfilePage() {
       {/* 統計（閲覧モード） */}
       {!editing && (
         <div className="flex gap-8 mb-6 border-t border-default pt-4">
+          <div>
+            <p className="text-xl font-bold text-gray-400">
+              {profile.followingCount ?? 0}
+            </p>
+            <p className="text-xs text-gray-500">フォロー</p>
+          </div>
+          <div>
+            <p className="text-xl font-bold text-gray-400">
+              {profile.followerCount ?? 0}
+            </p>
+            <p className="text-xs text-gray-500">フォロワー</p>
+          </div>
           <div>
             <p className="text-xl font-bold text-gray-400">
               {profile.totalPostCount ?? 0}
