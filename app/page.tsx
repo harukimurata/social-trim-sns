@@ -187,11 +187,11 @@ export default function App() {
   return (
     <main className="w-full max-w-[600px]">
       {/* 任意のタイミングでリストを更新するフェッチボタン */}
-      <div className="sticky top-14 z-10 bg-white/90 backdrop-blur-sm px-4 py-2 border-gray-100 max-w-[400px] mx-auto">
+      <div className="sticky top-14 z-10 bg-white/90 backdrop-blur-sm py-2 border-b border-gray-100 -mt-4 flex justify-center">
         <button
           onClick={() => fetchTimeline()}
           disabled={fetching}
-          className="w-full py-2 text-sm font-semibold text-brand border border-brand rounded-full hover:bg-brand/5 disabled:opacity-50 transition-colors"
+          className="w-[400px] py-2 text-sm font-semibold text-brand border border-brand rounded-full hover:bg-brand/5 disabled:opacity-50 transition-colors"
         >
           {fetching ? "更新中..." : "最新の投稿を読み込む"}
         </button>
