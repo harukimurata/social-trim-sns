@@ -57,6 +57,8 @@ export const handler: PostConfirmationTriggerHandler = async (event) => {
         username: "",
         bio: "",
         avatarUrl: "",
+        followingCount: 0,
+        followerCount: 0,
         createdAt: now,
         updatedAt: now,
       },

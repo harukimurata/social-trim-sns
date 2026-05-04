@@ -189,7 +189,7 @@
   }
 
   body {
-    @apply relative font-normal font-outfit z-1 bg-black flex justify-center items-start;
+    @apply relative font-normal font-outfit z-1 bg-white flex justify-center items-start;
   }
 }
 

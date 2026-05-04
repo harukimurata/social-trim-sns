@@ -1,0 +1,9 @@
+.speedDial {
+    right: max(1rem, calc((100vw - 1000px) / 2 + 1rem));
+}
+
+@media (min-width: 640px) {
+    .speedDial {
+        right: max(1.5rem, calc((100vw - 1000px) / 2 + 1.5rem));
+    }
+}

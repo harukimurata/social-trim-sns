@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import PostModal from "./PostModal";
+import styles from "./SpeedDial.module.css";
 
 export default function SpeedDial() {
   const [isPostModalOpen, setIsPostModalOpen] = useState(false);
@@ -12,7 +13,7 @@ export default function SpeedDial() {
         type="button"
         onClick={() => setIsPostModalOpen(true)}
         aria-label="新しい投稿"
-        className="fixed bottom-20 right-4 sm:bottom-6 sm:right-6 z-40 flex items-center justify-center w-14 h-14 text-white bg-brand rounded-full shadow-lg hover:bg-brand-strong focus:ring-4 focus:ring-brand-medium focus:outline-none transition-colors"
+        className={`fixed bottom-20 sm:bottom-6 z-40 flex items-center justify-center w-14 h-14 text-white bg-brand rounded-full shadow-lg hover:bg-brand-strong focus:ring-4 focus:ring-brand-medium focus:outline-none transition-colors ${styles.speedDial}`}
       >
         <svg
           className="w-6 h-6"

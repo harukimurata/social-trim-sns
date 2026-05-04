@@ -1,13 +1,14 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import MarkdownContent from "@/app/components/MarkdownContent";
 import { getCurrentUser, fetchAuthSession } from "aws-amplify/auth";
 import { uploadData, getUrl, remove } from "aws-amplify/storage";
 import { generateClient } from "aws-amplify/data";
 import type { Schema } from "@/amplify/data/resource";
 import { useSetAtom } from "jotai";
 import { avatarAtom } from "@/lib/atoms/avatarAtom";
-import { HiPencil, HiCamera, HiX } from "react-icons/hi";
+import { HiPencil, HiCamera, HiX, HiLockClosed, HiLockOpen } from "react-icons/hi";
 
 const client = generateClient<Schema>();
 
@@ -19,12 +20,54 @@ type ProfileData = {
   avatarUrl: string | null | undefined;
   totalPostCount: number | null | undefined;
   protectedPostCount: number | null | undefined;
+  followingCount: number | null | undefined;
+  followerCount: number | null | undefined;
   birthdate: string | null | undefined;
   mainUrl: string | null | undefined;
   mainArea: string | null | undefined;
 };
 
+type ProfilePost = {
+  id: string;
+  content: string;
+  originalContent?: string | null;
+  isEdited: boolean;
+  hashtags: string[];
+  favoriteCount: number;
+  viralCount: number;
+  ttl?: number | null;
+  isProtected: boolean;
+  createdAt: string;
+};
+
+function formatRelativeDate(isoString: string): string {
+  const diffMs = Date.now() - new Date(isoString).getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  if (diffMins < 1) return "たった今";
+  if (diffMins < 60) return `${diffMins}分前`;
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours}時間前`;
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays < 7) return `${diffDays}日前`;
+  return new Date(isoString).toLocaleDateString("ja-JP", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+}
+
+function formatUnixTimestamp(unix: number): string {
+  return new Date(unix * 1000).toLocaleString("ja-JP", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 export default function ProfilePage() {
+  // プロフィール状態
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
@@ -36,45 +79,80 @@ export default function ProfilePage() {
   const [saving, setSaving] = useState(false);
   const [avatarDisplayUrl, setAvatarDisplayUrl] = useState("");
   const setAvatar = useSetAtom(avatarAtom);
-  // 編集中の一時的なアバター状態
   const [pendingAvatarFile, setPendingAvatarFile] = useState<File | null>(null);
   const [pendingAvatarPreviewUrl, setPendingAvatarPreviewUrl] = useState("");
   const [avatarClearRequested, setAvatarClearRequested] = useState(false);
   const [error, setError] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // マウント時にログイン中ユーザーのプロフィールを取得し、アバターのS3署名付きURLを解決する
+  // 投稿状態
+  const [posts, setPosts] = useState<ProfilePost[]>([]);
+  const [postsLoading, setPostsLoading] = useState(true);
+  const [editingPostId, setEditingPostId] = useState<string | null>(null);
+  const [editPostContent, setEditPostContent] = useState("");
+  const [savingPostEdit, setSavingPostEdit] = useState(false);
+  const [protectingPostId, setProtectingPostId] = useState<string | null>(null);
+  const [postError, setPostError] = useState("");
+  const [showOriginalMap, setShowOriginalMap] = useState<Record<string, boolean>>({});
+
+  // マウント時にプロフィールと投稿を並列取得する
   useEffect(() => {
-    async function fetchProfile() {
+    async function fetchAll() {
       try {
         const { userId } = await getCurrentUser();
-        const { data } = await client.models.User.get({ userId });
-        if (data) {
+        const [userData, postsData] = await Promise.all([
+          client.models.User.get({ userId }),
+          client.models.Post.listPostByUserId({ userId }),
+        ]);
+
+        if (userData.data) {
+          const d = userData.data;
           setProfile({
-            userId: data.userId,
-            sequentialUserId: data.sequentialUserId,
-            username: data.username,
-            bio: data.bio,
-            avatarUrl: data.avatarUrl,
-            totalPostCount: data.totalPostCount,
-            protectedPostCount: data.protectedPostCount,
-            birthdate: data.birthdate,
-            mainUrl: data.mainUrl,
-            mainArea: data.mainArea,
+            userId: d.userId,
+            sequentialUserId: d.sequentialUserId,
+            username: d.username,
+            bio: d.bio,
+            avatarUrl: d.avatarUrl,
+            totalPostCount: d.totalPostCount,
+            protectedPostCount: d.protectedPostCount,
+            followingCount: d.followingCount,
+            followerCount: d.followerCount,
+            birthdate: d.birthdate,
+            mainUrl: d.mainUrl,
+            mainArea: d.mainArea,
           });
-          // アバターが設定されている場合のみ署名付きURLを取得
-          if (data.avatarUrl) {
-            const { url } = await getUrl({ path: data.avatarUrl });
+          if (d.avatarUrl) {
+            const { url } = await getUrl({ path: d.avatarUrl });
             setAvatarDisplayUrl(url.toString());
           }
         }
+
+        const sorted = (postsData.data ?? []).sort(
+          (a, b) =>
+            new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime()
+        );
+        setPosts(
+          sorted.map((p) => ({
+            id: p.id,
+            content: p.content,
+            originalContent: p.originalContent,
+            isEdited: p.isEdited ?? false,
+            hashtags: p.hashtags?.filter((h): h is string => !!h) ?? [],
+            favoriteCount: p.favoriteCount ?? 0,
+            viralCount: p.viralCount ?? 0,
+            ttl: p.ttl,
+            isProtected: p.isProtected ?? false,
+            createdAt: p.createdAt ?? "",
+          }))
+        );
       } catch {
         setError("プロフィールの取得に失敗しました");
       } finally {
         setLoading(false);
+        setPostsLoading(false);
       }
     }
-    fetchProfile();
+    fetchAll();
   }, []);
 
   // 編集モードへ切り替え、現在のプロフィール値をフォームの初期値にセットする
@@ -104,12 +182,10 @@ export default function ProfilePage() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // 画像ファイル以外はエラー
     if (!file.type.startsWith("image/")) {
       setError("画像ファイルを選択してください");
       return;
     }
-    // 10MB超過はエラー
     if (file.size > 10 * 1024 * 1024) {
       setError("ファイルサイズは10MB以下にしてください");
       return;
@@ -135,7 +211,6 @@ export default function ProfilePage() {
   // 編集内容をDBに保存し、必要に応じてS3のアバター画像をアップロード／削除する
   async function saveProfile() {
     if (!profile) return;
-    // ユーザー名は必須
     if (!editUsername.trim()) {
       setError("ユーザー名は必須です");
       return;
@@ -143,7 +218,6 @@ export default function ProfilePage() {
     setSaving(true);
     setError("");
     try {
-      // 新しい画像が選択されている場合はS3へアップロード
       let newAvatarPath: string | undefined;
       if (pendingAvatarFile) {
         const session = await fetchAuthSession();
@@ -155,12 +229,10 @@ export default function ProfilePage() {
         await uploadData({ path: newAvatarPath, data: pendingAvatarFile }).result;
       }
 
-      // 削除フラグが立っており、既存アバターがある場合はS3から削除
       if (avatarClearRequested && profile.avatarUrl) {
         await remove({ path: profile.avatarUrl });
       }
 
-      // アバター変更内容に応じてDB更新パッチを決定:
       // 新画像あり → 新パス、削除フラグあり → null、変更なし → パッチなし
       const avatarPatch = newAvatarPath
         ? { avatarUrl: newAvatarPath }
@@ -178,19 +250,15 @@ export default function ProfilePage() {
         ...avatarPatch,
       });
 
-      // 表示用URLを更新し、Navbarにも反映
       const newInitial = editUsername.trim()[0].toUpperCase();
       if (newAvatarPath) {
-        // 新しいアバターを設定した場合
         const { url } = await getUrl({ path: newAvatarPath });
         setAvatarDisplayUrl(url.toString());
         setAvatar({ initial: newInitial, displayUrl: url.toString() });
       } else if (avatarClearRequested) {
-        // アバターを削除した場合
         setAvatarDisplayUrl("");
         setAvatar({ initial: newInitial, displayUrl: "" });
       } else {
-        // アバター変更なし（イニシャルのみ更新）
         setAvatar((prev) => ({ ...prev, initial: newInitial }));
       }
 
@@ -226,7 +294,104 @@ export default function ProfilePage() {
     }
   }
 
-  // データ取得中はローディング表示
+  // 保護設定を切り替える。保護時は ttl を削除し、解除時は ttl = now + 7日 を再設定する
+  async function toggleProtect(post: ProfilePost) {
+    if (!profile) return;
+    if (!post.isProtected && (profile.protectedPostCount ?? 0) >= 5) {
+      setPostError("保護できる投稿は最大5件です。保護を解除してから設定してください。");
+      return;
+    }
+    setProtectingPostId(post.id);
+    setPostError("");
+    try {
+      if (post.isProtected) {
+        const newTtl = Math.floor(Date.now() / 1000) + 7 * 24 * 60 * 60;
+        await client.models.Post.update({ id: post.id, isProtected: false, ttl: newTtl });
+        await client.models.User.update({
+          userId: profile.userId,
+          protectedPostCount: Math.max(0, (profile.protectedPostCount ?? 1) - 1),
+        });
+        setPosts((prev) =>
+          prev.map((p) => (p.id === post.id ? { ...p, isProtected: false, ttl: newTtl } : p))
+        );
+        setProfile((prev) =>
+          prev
+            ? { ...prev, protectedPostCount: Math.max(0, (prev.protectedPostCount ?? 1) - 1) }
+            : prev
+        );
+      } else {
+        await client.models.Post.update({ id: post.id, isProtected: true, ttl: null });
+        await client.models.User.update({
+          userId: profile.userId,
+          protectedPostCount: (profile.protectedPostCount ?? 0) + 1,
+        });
+        setPosts((prev) =>
+          prev.map((p) => (p.id === post.id ? { ...p, isProtected: true, ttl: null } : p))
+        );
+        setProfile((prev) =>
+          prev
+            ? { ...prev, protectedPostCount: (prev.protectedPostCount ?? 0) + 1 }
+            : prev
+        );
+      }
+    } catch {
+      setPostError("保護設定の変更に失敗しました");
+    } finally {
+      setProtectingPostId(null);
+    }
+  }
+
+  function startEditPost(post: ProfilePost) {
+    setEditingPostId(post.id);
+    setEditPostContent(post.content);
+    setPostError("");
+  }
+
+  function cancelEditPost() {
+    setEditingPostId(null);
+    setEditPostContent("");
+  }
+
+  // 投稿を編集する（1回のみ）。編集後は isEdited = true、元の本文を originalContent に保存する
+  async function savePostEdit(post: ProfilePost) {
+    if (!editPostContent.trim()) return;
+    setSavingPostEdit(true);
+    setPostError("");
+    try {
+      const ttlPatch = post.isProtected
+        ? {}
+        : { ttl: Math.floor(Date.now() / 1000) + 7 * 24 * 60 * 60 };
+
+      await client.models.Post.update({
+        id: post.id,
+        content: editPostContent.trim(),
+        originalContent: post.content,
+        isEdited: true,
+        ...ttlPatch,
+      });
+
+      setPosts((prev) =>
+        prev.map((p) =>
+          p.id === post.id
+            ? {
+              ...p,
+              content: editPostContent.trim(),
+              originalContent: post.content,
+              isEdited: true,
+              ...ttlPatch,
+            }
+            : p
+        )
+      );
+      setEditingPostId(null);
+      setEditPostContent("");
+    } catch {
+      setPostError("投稿の編集に失敗しました");
+    } finally {
+      setSavingPostEdit(false);
+    }
+  }
+
   if (loading) {
     return (
       <main className="px-4 py-6">
@@ -235,7 +400,6 @@ export default function ProfilePage() {
     );
   }
 
-  // プロフィールが取得できなかった場合はエラー表示
   if (!profile) {
     return (
       <main className="px-4 py-6">
@@ -250,7 +414,6 @@ export default function ProfilePage() {
     ? profile.username[0].toUpperCase()
     : "?";
 
-  // 編集モード中のアバター表示: 選択済みプレビュー > 削除フラグ > 既存URL
   const editingAvatarSrc = pendingAvatarPreviewUrl
     ? pendingAvatarPreviewUrl
     : avatarClearRequested
@@ -264,7 +427,6 @@ export default function ProfilePage() {
       {/* ヘッダー */}
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-xl font-bold text-heading">プロフィール</h1>
-        {/* 閲覧モードのみ編集ボタンを表示 */}
         {!editing && (
           <button
             onClick={startEdit}
@@ -280,7 +442,6 @@ export default function ProfilePage() {
       <div className="flex items-center gap-4 mb-6">
         <div className="relative shrink-0">
           <div className="w-20 h-20 rounded-full bg-brand-500 flex items-center justify-center text-white text-2xl font-bold overflow-hidden">
-            {/* アバターURLがあれば画像、なければイニシャルを表示 */}
             {currentAvatarSrc ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
@@ -292,7 +453,6 @@ export default function ProfilePage() {
               avatarInitial
             )}
           </div>
-          {/* カメラボタン: 編集モードでホバー表示 */}
           {editing && (
             <button
               type="button"
@@ -304,7 +464,6 @@ export default function ProfilePage() {
               <HiCamera size={24} />
             </button>
           )}
-          {/* 削除ボタン: 編集モードかつアバターが存在する場合に表示 */}
           {showClearButton && (
             <button
               type="button"
@@ -325,7 +484,6 @@ export default function ProfilePage() {
           />
         </div>
 
-        {/* 閲覧モード: ユーザー名・bio表示 / 編集モード: ユーザー名入力フォーム */}
         {!editing ? (
           <div>
             {profile.sequentialUserId != null && (
@@ -413,7 +571,7 @@ export default function ProfilePage() {
         </div>
       )}
 
-      {/* 誕生日 / メインURL / メインエリア（閲覧モード）: いずれか1つでも値があれば表示 */}
+      {/* 誕生日 / メインURL / メインエリア（閲覧モード） */}
       {!editing &&
         (profile.birthdate || profile.mainUrl || profile.mainArea) && (
           <div className="space-y-1.5 mb-6 text-sm text-gray-600">
@@ -450,6 +608,18 @@ export default function ProfilePage() {
         <div className="flex gap-8 mb-6 border-t border-default pt-4">
           <div>
             <p className="text-xl font-bold text-gray-400">
+              {profile.followingCount ?? 0}
+            </p>
+            <p className="text-xs text-gray-500">フォロー</p>
+          </div>
+          <div>
+            <p className="text-xl font-bold text-gray-400">
+              {profile.followerCount ?? 0}
+            </p>
+            <p className="text-xs text-gray-500">フォロワー</p>
+          </div>
+          <div>
+            <p className="text-xl font-bold text-gray-400">
               {profile.totalPostCount ?? 0}
             </p>
             <p className="text-xs text-gray-500">累計投稿数</p>
@@ -464,10 +634,10 @@ export default function ProfilePage() {
         </div>
       )}
 
-      {/* エラー */}
+      {/* プロフィール編集エラー */}
       {error && <p className="text-sm text-red-600 mb-4">{error}</p>}
 
-      {/* 編集アクション */}
+      {/* プロフィール編集アクション */}
       {editing && (
         <div className="flex gap-3">
           <button
@@ -485,6 +655,151 @@ export default function ProfilePage() {
             キャンセル
           </button>
         </div>
+      )}
+
+      {/* 投稿一覧 */}
+      {!editing && (
+        <section className="border-t border-default mt-2">
+          <h2 className="text-sm font-bold text-gray-500 pt-4 pb-2">投稿</h2>
+
+          {postError && (
+            <p className="text-sm text-red-600 mb-3">{postError}</p>
+          )}
+
+          {postsLoading ? (
+            <p className="text-gray-400 text-sm py-4">読み込み中...</p>
+          ) : posts.length === 0 ? (
+            <p className="text-gray-400 text-sm py-4">まだ投稿がありません</p>
+          ) : (
+            <div>
+              {posts.map((post) => (
+                <div key={post.id} className="border-b border-gray-100 py-4">
+                  {editingPostId === post.id ? (
+                    /* 編集フォーム */
+                    <div>
+                      <textarea
+                        value={editPostContent}
+                        onChange={(e) => setEditPostContent(e.target.value)}
+                        maxLength={280}
+                        rows={5}
+                        className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-gray-500 transition-colors resize-none"
+                      />
+                      <p className="text-xs text-gray-400 text-right mt-0.5">
+                        {editPostContent.length} / 280
+                      </p>
+                      <div className="flex gap-3 mt-2">
+                        <button
+                          onClick={() => savePostEdit(post)}
+                          disabled={savingPostEdit || !editPostContent.trim()}
+                          className="flex-1 bg-gray-900 hover:bg-gray-700 text-white font-bold py-2 rounded-lg text-sm transition-colors disabled:opacity-50"
+                        >
+                          {savingPostEdit ? "保存中..." : "保存する"}
+                        </button>
+                        <button
+                          onClick={cancelEditPost}
+                          disabled={savingPostEdit}
+                          className="flex-1 border border-gray-300 text-gray-700 font-bold py-2 rounded-lg text-sm hover:bg-gray-50 transition-colors disabled:opacity-50"
+                        >
+                          キャンセル
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    /* 閲覧 + 管理ボタン */
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs text-gray-400">
+                          {post.createdAt ? formatRelativeDate(post.createdAt) : ""}
+                        </span>
+                        {post.isEdited && (
+                          <span className="flex items-center gap-0.5 text-xs text-gray-400">
+                            <HiPencil size={11} />
+                            編集済み
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="text-sm text-gray-800 whitespace-pre-wrap break-words leading-relaxed">
+                        <MarkdownContent>{showOriginalMap[post.id] && post.originalContent
+                          ? post.originalContent
+                          : post.content}</MarkdownContent>
+                      </div>
+
+                      {post.isEdited && post.originalContent && (
+                        <button
+                          onClick={() =>
+                            setShowOriginalMap((prev) => ({
+                              ...prev,
+                              [post.id]: !prev[post.id],
+                            }))
+                          }
+                          className="mt-1 text-xs text-blue-500 hover:underline"
+                        >
+                          {showOriginalMap[post.id] ? "編集後を表示" : "編集前を表示"}
+                        </button>
+                      )}
+
+                      {post.hashtags.length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
+                          {post.hashtags.map((tag, i) => (
+                            <span key={i} className="text-xs text-blue-500">
+                              #{tag}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
+                      <div className="mt-2 flex items-center justify-between">
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => toggleProtect(post)}
+                            disabled={
+                              protectingPostId === post.id ||
+                              (!post.isProtected && (profile.protectedPostCount ?? 0) >= 5)
+                            }
+                            className={`flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${post.isProtected
+                              ? "border-blue-400 text-blue-500 hover:bg-blue-50"
+                              : "border-gray-300 text-gray-600 hover:bg-gray-50"
+                              }`}
+                          >
+                            {post.isProtected ? (
+                              <HiLockClosed size={12} />
+                            ) : (
+                              <HiLockOpen size={12} />
+                            )}
+                            {protectingPostId === post.id
+                              ? "..."
+                              : post.isProtected
+                                ? "保護解除"
+                                : "保護する"}
+                          </button>
+
+                          {!post.isEdited && (
+                            <button
+                              onClick={() => startEditPost(post)}
+                              className="flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 transition-colors"
+                            >
+                              <HiPencil size={12} />
+                              編集
+                            </button>
+                          )}
+                        </div>
+
+                        <span className="text-xs text-gray-400">
+                          {post.isProtected
+                            ? "保護中（自動削除されません）"
+                            : post.ttl
+                              ? `削除予定: ${formatUnixTimestamp(post.ttl)}`
+                              : ""}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
       )}
     </main>
   );

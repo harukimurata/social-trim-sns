@@ -13,6 +13,8 @@ const schema = a.schema({
       avatarUrl: a.string(),
       protectedPostCount: a.integer().default(0),
       totalPostCount: a.integer().default(0),
+      followingCount: a.integer().default(0),
+      followerCount: a.integer().default(0),
       birthdate: a.date(),
       mainUrl: a.string(),
       mainArea: a.string(),

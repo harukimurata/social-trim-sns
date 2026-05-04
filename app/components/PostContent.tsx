@@ -1,17 +1,22 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import MarkdownContent from "./MarkdownContent";
 import {
   HiOutlineStar,
   HiChevronLeft,
   HiChevronRight,
 } from "react-icons/hi2";
-import { HiOutlineLightningBolt } from "react-icons/hi";
+import { HiOutlineLightningBolt, HiPencil } from "react-icons/hi";
 import { FaRegComment } from "react-icons/fa";
 import { IoClose } from "react-icons/io5";
 
 export type PostData = {
+  postId?: string;
+  userId?: string;
   content: string;
+  originalContent?: string;
+  isEdited?: boolean;
   hashtags: string[];
   imageUrls: string[];
   username: string;
@@ -21,10 +26,17 @@ export type PostData = {
   favoriteCount?: number;
   viralCount?: number;
   commentCount?: number;
+  /** null = 保護中（削除されない）、string = 削除予定日時、undefined = 非表示 */
+  deletionScheduledAt?: string | null;
+  isProtected?: boolean;
+  onPostClick?: () => void;
+  onAvatarClick?: () => void;
 };
 
 export default function PostContent({
   content,
+  originalContent,
+  isEdited,
   hashtags,
   imageUrls,
   username,
@@ -34,9 +46,16 @@ export default function PostContent({
   favoriteCount = 0,
   viralCount = 0,
   commentCount = 0,
+  deletionScheduledAt,
+  onPostClick,
+  onAvatarClick,
 }: PostData) {
   const [currentImage, setCurrentImage] = useState(0);
   const [zoomedIndex, setZoomedIndex] = useState<number | null>(null);
+  const [showOriginal, setShowOriginal] = useState(false);
+
+  const displayContent =
+    isEdited && showOriginal && originalContent ? originalContent : content;
   const filledHashtags = hashtags.filter((t) => t.trim() !== "");
 
   const goPrev = () => setCurrentImage((c) => Math.max(0, c - 1));
@@ -59,14 +78,20 @@ export default function PostContent({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [zoomedIndex, imageUrls.length]);
 
   return (
-    <div className="px-4 py-4 border-b border-gray-100">
+    <div
+      className={`px-4 py-4 border-gray-100 ${onPostClick ? "cursor-pointer hover:bg-gray-50 transition-colors" : ""}`}
+      onClick={onPostClick}
+    >
       <div className="flex gap-3">
-        {/* アバター */}
-        <div className="w-10 h-10 rounded-full bg-brand-500 flex items-center justify-center text-white text-sm font-semibold overflow-hidden shrink-0">
+        {/* アバター（クリックでプロフィールへ） */}
+        <div
+          className={`w-10 h-10 rounded-full bg-brand-500 flex items-center justify-center text-white text-sm font-semibold overflow-hidden shrink-0 ${onAvatarClick ? "cursor-pointer hover:opacity-80 transition-opacity" : ""}`}
+          onClick={(e) => { e.stopPropagation(); onAvatarClick?.(); }}
+        >
           {avatarUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
@@ -80,24 +105,43 @@ export default function PostContent({
         </div>
 
         <div className="flex-1 min-w-0">
-          {/* ユーザー名・日時 */}
-          <div className="flex items-baseline gap-2 mb-1">
+          {/* ユーザー名・日時・編集済みバッジ */}
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
             <span className="font-semibold text-sm text-gray-900 truncate">
               {username}
             </span>
             {createdAt && (
               <span className="text-xs text-gray-400 shrink-0">{createdAt}</span>
             )}
+            {isEdited && (
+              <span className="flex items-center gap-0.5 text-xs text-gray-400 shrink-0">
+                <HiPencil size={11} />
+                編集済み
+              </span>
+            )}
           </div>
 
-          {/* 本文 */}
-          <p className="text-sm text-gray-800 whitespace-pre-wrap break-words leading-relaxed">
-            {content}
-          </p>
+          {/* 本文（編集前/後で切り替え） */}
+          <div className="text-sm text-gray-800 break-words leading-relaxed">
+            <MarkdownContent>{displayContent}</MarkdownContent>
+          </div>
+
+          {/* 編集前/後 切り替えボタン */}
+          {isEdited && originalContent && (
+            <button
+              onClick={(e) => { e.stopPropagation(); setShowOriginal((v) => !v); }}
+              className="mt-1 text-xs text-fg-brand hover:underline"
+            >
+              {showOriginal ? "編集後を表示" : "編集前を表示"}
+            </button>
+          )}
 
           {/* 画像カルーセル */}
           {imageUrls.length > 0 && (
-            <div className="mt-3 relative rounded-xl overflow-hidden bg-gray-100 select-none">
+            <div
+              className="mt-3 relative rounded-xl overflow-hidden bg-gray-100 select-none"
+              onClick={(e) => e.stopPropagation()}
+            >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={imageUrls[currentImage]}
@@ -154,10 +198,13 @@ export default function PostContent({
 
           {/* ハッシュタグ */}
           {filledHashtags.length > 0 && (
-            <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
-              {filledHashtags.map((tag) => (
+            <div
+              className="mt-2 flex flex-wrap gap-x-3 gap-y-1"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {filledHashtags.map((tag, i) => (
                 <span
-                  key={tag}
+                  key={i}
                   className="text-xs text-fg-brand hover:underline cursor-pointer"
                 >
                   #{tag}
@@ -166,8 +213,12 @@ export default function PostContent({
             </div>
           )}
 
-          {/* アクションボタン（scaffold） */}
-          <div className="mt-3 flex gap-5">
+          {/* アクションボタン */}
+          <div className="mt-3 flex gap-5" onClick={(e) => e.stopPropagation()}>
+            <button className="flex items-center gap-1 text-xs text-gray-400 hover:text-brand transition-colors">
+              <FaRegComment size={14} />
+              {commentCount > 0 && <span>{commentCount}</span>}
+            </button>
             <button className="flex items-center gap-1 text-xs text-gray-400 hover:text-red-400 transition-colors">
               <HiOutlineStar size={16} />
               {favoriteCount > 0 && <span>{favoriteCount}</span>}
@@ -176,11 +227,17 @@ export default function PostContent({
               <HiOutlineLightningBolt size={16} />
               {viralCount > 0 && <span>{viralCount}</span>}
             </button>
-            <button className="flex items-center gap-1 text-xs text-gray-400 hover:text-brand transition-colors">
-              <FaRegComment size={14} />
-              {commentCount > 0 && <span>{commentCount}</span>}
-            </button>
+
           </div>
+
+          {/* 削除予定日時 / 保護ステータス */}
+          {deletionScheduledAt !== undefined && (
+            <p className="mt-2 text-xs text-right text-gray-400">
+              {deletionScheduledAt === null
+                ? "保護中（自動削除されません）"
+                : `削除予定: ${deletionScheduledAt}`}
+            </p>
+          )}
         </div>
       </div>
 
@@ -188,7 +245,7 @@ export default function PostContent({
       {zoomedIndex !== null && (
         <div
           className="fixed inset-0 z-[60] bg-black flex items-center justify-center"
-          onClick={() => setZoomedIndex(null)}
+          onClick={(e) => { e.stopPropagation(); setZoomedIndex(null); }}
         >
           {/* 閉じるボタン（左上） */}
           <button
