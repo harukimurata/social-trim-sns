@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { getCurrentUser } from "aws-amplify/auth";
 import { generateClient } from "aws-amplify/data";
 import { getUrl } from "aws-amplify/storage";
 import type { Schema } from "@/amplify/data/resource";
@@ -89,10 +90,18 @@ function formatUnixTimestamp(unix: number): string {
 export default function UserProfilePage() {
   const { userId } = useParams<{ userId: string }>();
   const router = useRouter();
+
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [posts, setPosts] = useState<ProfilePost[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  // フォロー関連
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [currentUserFollowingCount, setCurrentUserFollowingCount] = useState(0);
+  const [isFollowing, setIsFollowing] = useState(false);
+  const [followLoading, setFollowLoading] = useState(false);
+  const [followError, setFollowError] = useState("");
 
   useEffect(() => {
     if (!userId) return;
@@ -101,11 +110,16 @@ export default function UserProfilePage() {
       setLoading(true);
       setError("");
       try {
-        // ユーザー情報と投稿を並列フェッチ
-        const [userData, postsData] = await Promise.all([
+        // 現在のログインユーザー情報とプロフィールユーザー情報・投稿を並列フェッチ
+        const currentUser = await getCurrentUser();
+        const [userData, postsData, currentUserData] = await Promise.all([
           client.models.User.get({ userId }),
           client.models.Post.listPostByUserId({ userId }),
+          client.models.User.get({ userId: currentUser.userId }),
         ]);
+
+        setCurrentUserId(currentUser.userId);
+        setCurrentUserFollowingCount(currentUserData.data?.followingCount ?? 0);
 
         const user = userData.data;
         if (!user) {
@@ -128,6 +142,15 @@ export default function UserProfilePage() {
           mainUrl: user.mainUrl,
           mainArea: user.mainArea,
         });
+
+        // 自分のプロフィール以外のときのみフォロー状態を確認する
+        if (currentUser.userId !== userId) {
+          const followRecord = await client.models.Follow.get({
+            followerId: currentUser.userId,
+            followeeId: userId,
+          });
+          setIsFollowing(!!followRecord.data);
+        }
 
         // 投稿の画像URLを並列解決して新着順にソート
         const rawPosts = (postsData.data ?? []).sort(
@@ -167,6 +190,51 @@ export default function UserProfilePage() {
     fetchProfile();
   }, [userId]);
 
+  /**
+   * フォロー／解除を切り替える。
+   * followerCount はクライアント側で楽観的更新のみ（DB 側の更新は Lambda が担う想定）。
+   */
+  async function handleFollowToggle() {
+    if (!currentUserId || !profile || currentUserId === profile.userId) return;
+    setFollowLoading(true);
+    setFollowError("");
+    try {
+      if (isFollowing) {
+        await client.models.Follow.delete({
+          followerId: currentUserId,
+          followeeId: profile.userId,
+        });
+        await client.models.User.update({
+          userId: currentUserId,
+          followingCount: Math.max(0, currentUserFollowingCount - 1),
+        });
+        setCurrentUserFollowingCount((prev) => Math.max(0, prev - 1));
+        setProfile((prev) =>
+          prev ? { ...prev, followerCount: Math.max(0, (prev.followerCount ?? 1) - 1) } : prev
+        );
+        setIsFollowing(false);
+      } else {
+        await client.models.Follow.create({
+          followerId: currentUserId,
+          followeeId: profile.userId,
+        });
+        await client.models.User.update({
+          userId: currentUserId,
+          followingCount: currentUserFollowingCount + 1,
+        });
+        setCurrentUserFollowingCount((prev) => prev + 1);
+        setProfile((prev) =>
+          prev ? { ...prev, followerCount: (prev.followerCount ?? 0) + 1 } : prev
+        );
+        setIsFollowing(true);
+      }
+    } catch {
+      setFollowError("フォロー操作に失敗しました");
+    } finally {
+      setFollowLoading(false);
+    }
+  }
+
   if (loading) {
     return (
       <main className="px-4 py-6">
@@ -191,6 +259,7 @@ export default function UserProfilePage() {
   }
 
   const avatarInitial = profile.username[0]?.toUpperCase() ?? "?";
+  const isSelf = currentUserId === profile.userId;
 
   return (
     <main>
@@ -207,7 +276,7 @@ export default function UserProfilePage() {
 
       {/* プロフィールヘッダー */}
       <div className="px-4 py-6 border-b border-gray-100">
-        {/* アバター + ユーザー名 */}
+        {/* アバター + ユーザー名 + フォローボタン */}
         <div className="flex items-center gap-4 mb-4">
           <div className="w-20 h-20 rounded-full bg-brand-500 flex items-center justify-center text-white text-2xl font-bold overflow-hidden shrink-0">
             {profile.avatarUrl ? (
@@ -221,7 +290,7 @@ export default function UserProfilePage() {
               avatarInitial
             )}
           </div>
-          <div>
+          <div className="flex-1 min-w-0">
             {profile.sequentialUserId != null && (
               <p className="text-xs text-gray-400 mb-0.5">ID: {profile.sequentialUserId}</p>
             )}
@@ -230,7 +299,25 @@ export default function UserProfilePage() {
               <p className="text-sm text-gray-500 mt-1 whitespace-pre-wrap">{profile.bio}</p>
             )}
           </div>
+          {/* 他ユーザーのみフォローボタンを表示 */}
+          {!isSelf && currentUserId && (
+            <div className="shrink-0">
+              <button
+                onClick={handleFollowToggle}
+                disabled={followLoading}
+                className={`px-4 py-2 text-sm font-bold rounded-full transition-colors disabled:opacity-50 ${
+                  isFollowing
+                    ? "border border-gray-400 text-gray-700 hover:border-red-400 hover:text-red-500"
+                    : "bg-gray-900 text-white hover:bg-gray-700"
+                }`}
+              >
+                {followLoading ? "..." : isFollowing ? "フォロー解除" : "フォロー"}
+              </button>
+            </div>
+          )}
         </div>
+
+        {followError && <p className="text-xs text-red-500 mb-3">{followError}</p>}
 
         {/* 追加情報 */}
         {(profile.birthdate || profile.mainUrl || profile.mainArea) && (
@@ -265,14 +352,20 @@ export default function UserProfilePage() {
 
         {/* 統計 */}
         <div className="flex gap-8 pt-3 border-t border-default">
-          <div>
+          <button
+            onClick={() => router.push(`/follow?userId=${profile.userId}`)}
+            className="text-left hover:opacity-70 transition-opacity"
+          >
             <p className="text-xl font-bold text-gray-400">{profile.followingCount ?? 0}</p>
             <p className="text-xs text-gray-500">フォロー</p>
-          </div>
-          <div>
+          </button>
+          <button
+            onClick={() => router.push(`/follower?userId=${profile.userId}`)}
+            className="text-left hover:opacity-70 transition-opacity"
+          >
             <p className="text-xl font-bold text-gray-400">{profile.followerCount ?? 0}</p>
             <p className="text-xs text-gray-500">フォロワー</p>
-          </div>
+          </button>
           <div>
             <p className="text-xl font-bold text-gray-400">{profile.totalPostCount ?? 0}</p>
             <p className="text-xs text-gray-500">累計投稿数</p>
