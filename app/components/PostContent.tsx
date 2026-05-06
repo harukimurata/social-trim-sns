@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import MarkdownContent from "./MarkdownContent";
 import {
   HiOutlineStar,
+  HiStar,
   HiChevronLeft,
   HiChevronRight,
 } from "react-icons/hi2";
@@ -30,11 +31,14 @@ export type PostData = {
   /** null = 保護中（削除されない）、string = 削除予定日時、undefined = 非表示 */
   deletionScheduledAt?: string | null;
   isProtected?: boolean;
+  isFavorited?: boolean;
   onPostClick?: () => void;
   onAvatarClick?: () => void;
+  onFavoriteToggle?: (postId: string, currentlyFavorited: boolean) => Promise<void>;
 };
 
 export default function PostContent({
+  postId,
   content,
   originalContent,
   isEdited,
@@ -48,13 +52,43 @@ export default function PostContent({
   viralCount = 0,
   commentCount = 0,
   deletionScheduledAt,
+  isFavorited = false,
   onPostClick,
   onAvatarClick,
+  onFavoriteToggle,
 }: PostData) {
   const router = useRouter();
   const [currentImage, setCurrentImage] = useState(0);
   const [zoomedIndex, setZoomedIndex] = useState<number | null>(null);
   const [showOriginal, setShowOriginal] = useState(false);
+  const [localFavorited, setLocalFavorited] = useState(isFavorited);
+  const [localFavoriteCount, setLocalFavoriteCount] = useState(favoriteCount);
+  const [favoriting, setFavoriting] = useState(false);
+
+  useEffect(() => {
+    setLocalFavorited(isFavorited);
+  }, [isFavorited]);
+
+  useEffect(() => {
+    setLocalFavoriteCount(favoriteCount);
+  }, [favoriteCount]);
+
+  const handleFavoriteClick = useCallback(async () => {
+    if (!onFavoriteToggle || !postId || favoriting) return;
+    setFavoriting(true);
+    const prevFavorited = localFavorited;
+    const prevCount = localFavoriteCount;
+    setLocalFavorited(!localFavorited);
+    setLocalFavoriteCount(localFavorited ? Math.max(0, localFavoriteCount - 1) : localFavoriteCount + 1);
+    try {
+      await onFavoriteToggle(postId, localFavorited);
+    } catch {
+      setLocalFavorited(prevFavorited);
+      setLocalFavoriteCount(prevCount);
+    } finally {
+      setFavoriting(false);
+    }
+  }, [onFavoriteToggle, postId, favoriting, localFavorited, localFavoriteCount]);
 
   const handleHashtagClick = useCallback(
     (tag: string) => router.push(`/search?mode=hashtag&q=${encodeURIComponent(tag)}`),
@@ -227,9 +261,17 @@ export default function PostContent({
               <FaRegComment size={14} />
               {commentCount > 0 && <span>{commentCount}</span>}
             </button>
-            <button className="flex items-center gap-1 text-xs text-gray-400 hover:text-red-400 transition-colors">
-              <HiOutlineStar size={16} />
-              {favoriteCount > 0 && <span>{favoriteCount}</span>}
+            <button
+              onClick={onFavoriteToggle ? handleFavoriteClick : undefined}
+              disabled={favoriting}
+              className={`flex items-center gap-1 text-xs transition-colors disabled:opacity-50 ${
+                localFavorited
+                  ? "text-red-400"
+                  : "text-gray-400 hover:text-red-400"
+              } ${onFavoriteToggle ? "cursor-pointer" : "cursor-default"}`}
+            >
+              {localFavorited ? <HiStar size={16} /> : <HiOutlineStar size={16} />}
+              {localFavoriteCount > 0 && <span>{localFavoriteCount}</span>}
             </button>
             <button className="flex items-center gap-1 text-xs text-gray-400 hover:text-green-500 transition-colors">
               <HiOutlineLightningBolt size={16} />

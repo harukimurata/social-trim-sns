@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { getCurrentUser } from "aws-amplify/auth";
 import { generateClient } from "aws-amplify/data";
@@ -102,6 +102,14 @@ export default function UserProfilePage() {
   const [followLoading, setFollowLoading] = useState(false);
   const [followError, setFollowError] = useState("");
 
+  // タブ・お気に入り関連
+  const [activeTab, setActiveTab] = useState<"posts" | "favorites">("posts");
+  const [favoritePosts, setFavoritePosts] = useState<ProfilePost[]>([]);
+  const [favoritesLoading, setFavoritesLoading] = useState(false);
+  const [favoritesLoaded, setFavoritesLoaded] = useState(false);
+  // 現在ログイン中ユーザーがお気に入りしている投稿ID（両タブの isFavorited 用）
+  const [currentUserFavIds, setCurrentUserFavIds] = useState<Set<string>>(new Set());
+
   useEffect(() => {
     if (!userId) return;
 
@@ -149,6 +157,14 @@ export default function UserProfilePage() {
           setIsFollowing(!!followRecord.data);
         }
 
+        // 現在ログイン中ユーザーのお気に入りIDを取得する
+        const { data: myReactions } = await client.models.UserReaction.listUserReactionByUserId({
+          userId: currentUser.userId,
+        });
+        setCurrentUserFavIds(
+          new Set((myReactions ?? []).filter((r) => r.type === "FAVORITE").map((r) => r.postId))
+        );
+
         // 投稿の画像URLを並列解決して新着順にソート
         const rawPosts = (postsData.data ?? []).sort(
           (a, b) =>
@@ -186,6 +202,71 @@ export default function UserProfilePage() {
 
     fetchProfile();
   }, [userId]);
+
+  const fetchFavorites = useCallback(async () => {
+    if (!userId) return;
+    setFavoritesLoading(true);
+    try {
+      // プロフィールユーザーのお気に入りリアクションを取得する
+      const { data: reactions } = await client.models.UserReaction.listUserReactionByUserId({ userId });
+      const favoriteReactions = (reactions ?? []).filter((r) => r.type === "FAVORITE");
+
+      const rawPosts = await Promise.all(
+        favoriteReactions.map(async (r) => {
+          const { data: post } = await client.models.Post.get({ id: r.postId });
+          return post ?? null;
+        })
+      );
+      const validPosts = rawPosts
+        .filter((p): p is NonNullable<typeof p> => !!p)
+        .sort((a, b) => new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime());
+
+      const resolvedImages = await Promise.all(
+        validPosts.map(async (post) => {
+          const paths = post.imageUrls?.filter((p): p is string => !!p) ?? [];
+          return Promise.all(paths.map(resolveS3Url));
+        })
+      );
+
+      setFavoritePosts(
+        validPosts.map((post, i) => ({
+          id: post.id,
+          content: post.content,
+          originalContent: post.originalContent,
+          isEdited: post.isEdited ?? false,
+          imageUrls: resolvedImages[i].filter(Boolean),
+          hashtags: post.hashtags?.filter((h): h is string => !!h) ?? [],
+          favoriteCount: post.favoriteCount ?? 0,
+          viralCount: post.viralCount ?? 0,
+          ttl: post.ttl,
+          isProtected: post.isProtected ?? false,
+          createdAt: post.createdAt ?? "",
+        }))
+      );
+      setFavoritesLoaded(true);
+    } catch {
+      // フェッチ失敗時はリストを空にする
+    } finally {
+      setFavoritesLoading(false);
+    }
+  }, [userId]);
+
+  const handleFavoriteToggle = useCallback(async (postId: string, currentlyFavorited: boolean) => {
+    if (!currentUserId) return;
+    if (currentlyFavorited) {
+      await client.models.UserReaction.delete({ userId: currentUserId, postId });
+      setCurrentUserFavIds((prev) => { const next = new Set(prev); next.delete(postId); return next; });
+    } else {
+      await client.models.UserReaction.create({ userId: currentUserId, postId, type: "FAVORITE" });
+      setCurrentUserFavIds((prev) => new Set(prev).add(postId));
+    }
+  }, [currentUserId]);
+
+  useEffect(() => {
+    if (activeTab === "favorites" && !favoritesLoaded) {
+      fetchFavorites();
+    }
+  }, [activeTab, favoritesLoaded, fetchFavorites]);
 
   async function handleFollowToggle() {
     if (!currentUserId || !profile || currentUserId === profile.userId) return;
@@ -360,39 +441,102 @@ export default function UserProfilePage() {
         </div>
       </div>
 
-      {/* 投稿一覧 */}
-      {posts.length === 0 ? (
-        <p className="px-4 py-8 text-center text-sm text-gray-400">まだ投稿がありません</p>
-      ) : (
-        <div>
-          {posts.map((post) => (
-            <PostContent
-              key={post.id}
-              postId={post.id}
-              userId={profile.userId}
-              content={post.content}
-              originalContent={post.originalContent ?? undefined}
-              isEdited={post.isEdited}
-              hashtags={post.hashtags}
-              imageUrls={post.imageUrls}
-              username={profile.username}
-              userInitial={avatarInitial}
-              avatarUrl={profile.avatarUrl}
-              createdAt={post.createdAt ? formatRelativeDate(post.createdAt) : undefined}
-              favoriteCount={post.favoriteCount}
-              viralCount={post.viralCount}
-              deletionScheduledAt={
-                post.isProtected
-                  ? null
-                  : post.ttl
-                    ? formatUnixTimestamp(post.ttl)
-                    : undefined
-              }
-              isProtected={post.isProtected}
-              onPostClick={() => router.push(`/post/${post.id}`)}
-            />
-          ))}
-        </div>
+      {/* 投稿/お気に入りタブ */}
+      <div className="flex border-b border-gray-100">
+        <button
+          onClick={() => setActiveTab("posts")}
+          className={`flex-1 py-3 text-sm font-semibold transition-colors ${
+            activeTab === "posts"
+              ? "text-brand border-b-2 border-brand"
+              : "text-gray-500 hover:text-gray-700"
+          }`}
+        >
+          投稿
+        </button>
+        <button
+          onClick={() => setActiveTab("favorites")}
+          className={`flex-1 py-3 text-sm font-semibold transition-colors ${
+            activeTab === "favorites"
+              ? "text-brand border-b-2 border-brand"
+              : "text-gray-500 hover:text-gray-700"
+          }`}
+        >
+          お気に入り
+        </button>
+      </div>
+
+      {/* 投稿タブ */}
+      {activeTab === "posts" && (
+        posts.length === 0 ? (
+          <p className="px-4 py-8 text-center text-sm text-gray-400">まだ投稿がありません</p>
+        ) : (
+          <div>
+            {posts.map((post) => (
+              <PostContent
+                key={post.id}
+                postId={post.id}
+                userId={profile.userId}
+                content={post.content}
+                originalContent={post.originalContent ?? undefined}
+                isEdited={post.isEdited}
+                hashtags={post.hashtags}
+                imageUrls={post.imageUrls}
+                username={profile.username}
+                userInitial={avatarInitial}
+                avatarUrl={profile.avatarUrl}
+                createdAt={post.createdAt ? formatRelativeDate(post.createdAt) : undefined}
+                favoriteCount={post.favoriteCount}
+                viralCount={post.viralCount}
+                isFavorited={currentUserFavIds.has(post.id)}
+                onFavoriteToggle={currentUserId && !isSelf ? handleFavoriteToggle : undefined}
+                deletionScheduledAt={
+                  post.isProtected
+                    ? null
+                    : post.ttl
+                      ? formatUnixTimestamp(post.ttl)
+                      : undefined
+                }
+                isProtected={post.isProtected}
+                onPostClick={() => router.push(`/post/${post.id}`)}
+                onAvatarClick={() => router.push(`/profile/${profile.userId}`)}
+              />
+            ))}
+          </div>
+        )
+      )}
+
+      {/* お気に入りタブ */}
+      {activeTab === "favorites" && (
+        favoritesLoading ? (
+          <p className="px-4 py-8 text-center text-sm text-gray-400">読み込み中...</p>
+        ) : favoritePosts.length === 0 ? (
+          <p className="px-4 py-8 text-center text-sm text-gray-400">お気に入りの投稿はありません</p>
+        ) : (
+          <div>
+            {favoritePosts.map((post) => (
+              <PostContent
+                key={post.id}
+                postId={post.id}
+                userId={post.id}
+                content={post.content}
+                originalContent={post.originalContent ?? undefined}
+                isEdited={post.isEdited}
+                hashtags={post.hashtags}
+                imageUrls={post.imageUrls}
+                username={profile.username}
+                userInitial={avatarInitial}
+                avatarUrl={profile.avatarUrl}
+                createdAt={post.createdAt ? formatRelativeDate(post.createdAt) : undefined}
+                favoriteCount={post.favoriteCount}
+                viralCount={post.viralCount}
+                isFavorited={currentUserFavIds.has(post.id)}
+                onFavoriteToggle={currentUserId ? handleFavoriteToggle : undefined}
+                onPostClick={() => router.push(`/post/${post.id}`)}
+                onAvatarClick={() => router.push(`/profile/${profile.userId}`)}
+              />
+            ))}
+          </div>
+        )
       )}
     </main>
   );

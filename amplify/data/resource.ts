@@ -77,6 +77,7 @@ const schema = a.schema({
       type: a.ref("ReactionType").required(),
     })
     .identifier(["userId", "postId"])
+    .secondaryIndexes((index) => [index("userId")])
     .authorization((allow) => [
       allow.ownerDefinedIn("userId"),
       allow.authenticated().to(["read"]),
@@ -141,6 +142,18 @@ const schema = a.schema({
       allow.ownerDefinedIn("userId"),
       allow.authenticated().to(["read"]),
     ]),
+
+  // お気に入り通知 (UserReaction INSERT 時に Lambda が作成)
+  Notification: a
+    .model({
+      recipientId: a.string().required(),
+      senderId: a.string().required(),
+      type: a.string().required(),
+      postId: a.string().required(),
+      isRead: a.boolean().default(false),
+    })
+    .secondaryIndexes((index) => [index("recipientId")])
+    .authorization((allow) => [allow.ownerDefinedIn("recipientId")]),
 
   // Favorite ランキング (EventBridge + Lambda バッチが定期上書き)
   FavoriteRanking: a

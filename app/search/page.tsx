@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { generateClient } from "aws-amplify/data";
+import { getCurrentUser } from "aws-amplify/auth";
 import { getUrl } from "aws-amplify/storage";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { Schema } from "@/amplify/data/resource";
@@ -76,6 +77,8 @@ export default function SearchPage() {
   const [error, setError] = useState("");
   const [posts, setPosts] = useState<SearchPost[]>([]);
   const [searched, setSearched] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [favoritedPostIds, setFavoritedPostIds] = useState<Set<string>>(new Set());
 
   function switchMode(next: SearchMode) {
     setMode(next);
@@ -83,6 +86,7 @@ export default function SearchPage() {
     setError("");
     setPosts([]);
     setSearched(false);
+    setFavoritedPostIds(new Set());
   }
 
   async function performSearch(searchMode: SearchMode, searchQuery: string) {
@@ -111,6 +115,9 @@ export default function SearchPage() {
         }
         router.push(`/profile/${user.userId}`);
       } else {
+        const { userId } = await getCurrentUser();
+        setCurrentUserId(userId);
+
         const tag = trimmed.replace(/^#/, "");
         const { data: rawPosts } = await client.models.Post.list({
           filter: { hashtags: { contains: tag } },
@@ -167,6 +174,12 @@ export default function SearchPage() {
             };
           })
         );
+
+        // 現在ログイン中ユーザーのお気に入りを取得してSetを構築する
+        const { data: reactions } = await client.models.UserReaction.listUserReactionByUserId({ userId });
+        setFavoritedPostIds(
+          new Set((reactions ?? []).filter((r) => r.type === "FAVORITE").map((r) => r.postId))
+        );
       }
     } catch (e) {
       console.error(e);
@@ -175,6 +188,17 @@ export default function SearchPage() {
       setLoading(false);
     }
   }
+
+  const handleFavoriteToggle = useCallback(async (postId: string, currentlyFavorited: boolean) => {
+    if (!currentUserId) return;
+    if (currentlyFavorited) {
+      await client.models.UserReaction.delete({ userId: currentUserId, postId });
+      setFavoritedPostIds((prev) => { const next = new Set(prev); next.delete(postId); return next; });
+    } else {
+      await client.models.UserReaction.create({ userId: currentUserId, postId, type: "FAVORITE" });
+      setFavoritedPostIds((prev) => new Set(prev).add(postId));
+    }
+  }, [currentUserId]);
 
   // URL パラメータが変わるたびにハッシュタグ検索を実行する
   useEffect(() => {
@@ -279,8 +303,10 @@ export default function SearchPage() {
                       : undefined
                 }
                 isProtected={post.isProtected}
+                isFavorited={favoritedPostIds.has(post.id)}
                 onPostClick={() => router.push(`/post/${post.id}`)}
                 onAvatarClick={() => router.push(`/profile/${post.userId}`)}
+                onFavoriteToggle={handleFavoriteToggle}
               />
             ))}
           </div>
