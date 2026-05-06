@@ -626,9 +626,9 @@ export default function ProfilePage() {
             )}
             <p className="text-lg font-bold text-gray-500">{profile.username}</p>
             {profile.bio && (
-              <p className="text-sm text-gray-500 mt-0.5 whitespace-pre-wrap">
-                {profile.bio}
-              </p>
+              <div className="text-sm text-gray-500 mt-0.5 whitespace-pre-wrap">
+                <MarkdownContent>{profile.bio}</MarkdownContent>
+              </div>
             )}
           </div>
         ) : (
@@ -804,21 +804,19 @@ export default function ProfilePage() {
           <div className="flex border-b border-default">
             <button
               onClick={() => setActiveTab("posts")}
-              className={`flex-1 py-3 text-sm font-semibold transition-colors ${
-                activeTab === "posts"
-                  ? "text-brand border-b-2 border-brand"
-                  : "text-gray-500 hover:text-gray-700"
-              }`}
+              className={`flex-1 py-3 text-sm font-semibold transition-colors ${activeTab === "posts"
+                ? "text-brand border-b-2 border-brand"
+                : "text-gray-500 hover:text-gray-700"
+                }`}
             >
               投稿
             </button>
             <button
               onClick={() => setActiveTab("favorites")}
-              className={`flex-1 py-3 text-sm font-semibold transition-colors ${
-                activeTab === "favorites"
-                  ? "text-brand border-b-2 border-brand"
-                  : "text-gray-500 hover:text-gray-700"
-              }`}
+              className={`flex-1 py-3 text-sm font-semibold transition-colors ${activeTab === "favorites"
+                ? "text-brand border-b-2 border-brand"
+                : "text-gray-500 hover:text-gray-700"
+                }`}
             >
               お気に入り
             </button>
@@ -926,11 +924,10 @@ export default function ProfilePage() {
                             </span>
                             <button
                               onClick={() => handleFavoriteToggle(post.id, favoritedIds.has(post.id))}
-                              className={`flex items-center gap-1 text-xs transition-colors ${
-                                favoritedIds.has(post.id)
-                                  ? "text-red-400"
-                                  : "text-gray-400 hover:text-red-400"
-                              }`}
+                              className={`flex items-center gap-1 text-xs transition-colors ${favoritedIds.has(post.id)
+                                ? "text-red-400"
+                                : "text-gray-400 hover:text-red-400"
+                                }`}
                             >
                               {favoritedIds.has(post.id) ? <HiStar size={16} /> : <HiOutlineStar size={16} />}
                               {post.favoriteCount > 0 && <span>{post.favoriteCount}</span>}
@@ -949,11 +946,10 @@ export default function ProfilePage() {
                                   protectingPostId === post.id ||
                                   (!post.isProtected && (profile.protectedPostCount ?? 0) >= 5)
                                 }
-                                className={`flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                                  post.isProtected
-                                    ? "border-blue-400 text-blue-500 hover:bg-blue-50"
-                                    : "border-gray-300 text-gray-600 hover:bg-gray-50"
-                                }`}
+                                className={`flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${post.isProtected
+                                  ? "border-blue-400 text-blue-500 hover:bg-blue-50"
+                                  : "border-gray-300 text-gray-600 hover:bg-gray-50"
+                                  }`}
                               >
                                 {post.isProtected ? (
                                   <HiLockClosed size={12} />

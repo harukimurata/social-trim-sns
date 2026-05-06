@@ -7,6 +7,7 @@ import { generateClient } from "aws-amplify/data";
 import { getUrl } from "aws-amplify/storage";
 import type { Schema } from "@/amplify/data/resource";
 import PostContent from "@/app/components/PostContent";
+import MarkdownContent from "@/app/components/MarkdownContent";
 import { HiArrowLeft } from "react-icons/hi";
 
 const client = generateClient<Schema>();
@@ -364,7 +365,9 @@ export default function UserProfilePage() {
             )}
             <p className="text-lg font-bold text-gray-800">{profile.username}</p>
             {profile.bio && (
-              <p className="text-sm text-gray-500 mt-1 whitespace-pre-wrap">{profile.bio}</p>
+              <div className="text-sm text-gray-500 mt-1 whitespace-pre-wrap">
+                <MarkdownContent>{profile.bio}</MarkdownContent>
+              </div>
             )}
           </div>
           {/* 他ユーザーのみフォローボタンを表示 */}
@@ -373,11 +376,10 @@ export default function UserProfilePage() {
               <button
                 onClick={handleFollowToggle}
                 disabled={followLoading}
-                className={`px-4 py-2 text-sm font-bold rounded-full transition-colors disabled:opacity-50 ${
-                  isFollowing
-                    ? "border border-gray-400 text-gray-700 hover:border-red-400 hover:text-red-500"
-                    : "bg-gray-900 text-white hover:bg-gray-700"
-                }`}
+                className={`px-4 py-2 text-sm font-bold rounded-full transition-colors disabled:opacity-50 ${isFollowing
+                  ? "border border-gray-400 text-gray-700 hover:border-red-400 hover:text-red-500"
+                  : "bg-gray-900 text-white hover:bg-gray-700"
+                  }`}
               >
                 {followLoading ? "..." : isFollowing ? "フォロー解除" : "フォロー"}
               </button>
@@ -445,21 +447,19 @@ export default function UserProfilePage() {
       <div className="flex border-b border-gray-100">
         <button
           onClick={() => setActiveTab("posts")}
-          className={`flex-1 py-3 text-sm font-semibold transition-colors ${
-            activeTab === "posts"
-              ? "text-brand border-b-2 border-brand"
-              : "text-gray-500 hover:text-gray-700"
-          }`}
+          className={`flex-1 py-3 text-sm font-semibold transition-colors ${activeTab === "posts"
+            ? "text-brand border-b-2 border-brand"
+            : "text-gray-500 hover:text-gray-700"
+            }`}
         >
           投稿
         </button>
         <button
           onClick={() => setActiveTab("favorites")}
-          className={`flex-1 py-3 text-sm font-semibold transition-colors ${
-            activeTab === "favorites"
-              ? "text-brand border-b-2 border-brand"
-              : "text-gray-500 hover:text-gray-700"
-          }`}
+          className={`flex-1 py-3 text-sm font-semibold transition-colors ${activeTab === "favorites"
+            ? "text-brand border-b-2 border-brand"
+            : "text-gray-500 hover:text-gray-700"
+            }`}
         >
           お気に入り
         </button>

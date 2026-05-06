@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import MarkdownContent from "@/app/components/MarkdownContent";
 
 export type ProfileCellData = {
   userId: string;
@@ -32,7 +33,9 @@ export default function ProfileCell({ userId, username, bio, avatarUrl }: Profil
       </div>
       <div className="min-w-0">
         <p className="text-sm font-bold text-gray-800 truncate">{username}</p>
-        {bio && <p className="text-xs text-gray-500 truncate">{bio}</p>}
+        {bio && <div className="text-xs text-gray-500 truncate">
+          <MarkdownContent>{bio}</MarkdownContent>
+        </div>}
       </div>
     </button>
   );
