@@ -8,6 +8,7 @@ import { generateClient } from "aws-amplify/data";
 import type { Schema } from "@/amplify/data/resource";
 import { useSetAtom } from "jotai";
 import { avatarAtom } from "@/lib/atoms/avatarAtom";
+import { useRouter } from "next/navigation";
 import { HiPencil, HiCamera, HiX, HiLockClosed, HiLockOpen } from "react-icons/hi";
 
 const client = generateClient<Schema>();
@@ -67,6 +68,8 @@ function formatUnixTimestamp(unix: number): string {
 }
 
 export default function ProfilePage() {
+  const router = useRouter();
+
   // プロフィール状態
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -606,18 +609,24 @@ export default function ProfilePage() {
       {/* 統計（閲覧モード） */}
       {!editing && (
         <div className="flex gap-8 mb-6 border-t border-default pt-4">
-          <div>
+          <button
+            onClick={() => router.push("/follow")}
+            className="text-left hover:opacity-70 transition-opacity"
+          >
             <p className="text-xl font-bold text-gray-400">
               {profile.followingCount ?? 0}
             </p>
             <p className="text-xs text-gray-500">フォロー</p>
-          </div>
-          <div>
+          </button>
+          <button
+            onClick={() => router.push("/follower")}
+            className="text-left hover:opacity-70 transition-opacity"
+          >
             <p className="text-xl font-bold text-gray-400">
               {profile.followerCount ?? 0}
             </p>
             <p className="text-xs text-gray-500">フォロワー</p>
-          </div>
+          </button>
           <div>
             <p className="text-xl font-bold text-gray-400">
               {profile.totalPostCount ?? 0}
@@ -742,7 +751,11 @@ export default function ProfilePage() {
                       {post.hashtags.length > 0 && (
                         <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
                           {post.hashtags.map((tag, i) => (
-                            <span key={i} className="text-xs text-blue-500">
+                            <span
+                              key={i}
+                              className="text-xs text-blue-500 hover:underline cursor-pointer"
+                              onClick={() => router.push(`/search?mode=hashtag&q=${encodeURIComponent(tag)}`)}
+                            >
                               #{tag}
                             </span>
                           ))}
