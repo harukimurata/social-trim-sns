@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { generateClient } from "aws-amplify/data";
 import { getUrl } from "aws-amplify/storage";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import type { Schema } from "@/amplify/data/resource";
 import PostContent from "@/app/components/PostContent";
 
@@ -66,8 +66,12 @@ function formatUnixTimestamp(unix: number): string {
 
 export default function SearchPage() {
   const router = useRouter();
-  const [mode, setMode] = useState<SearchMode>("userId");
-  const [query, setQuery] = useState("");
+  const searchParams = useSearchParams();
+
+  const [mode, setMode] = useState<SearchMode>(() =>
+    searchParams.get("mode") === "hashtag" ? "hashtag" : "userId"
+  );
+  const [query, setQuery] = useState(() => searchParams.get("q") ?? "");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [posts, setPosts] = useState<SearchPost[]>([]);
@@ -81,8 +85,8 @@ export default function SearchPage() {
     setSearched(false);
   }
 
-  async function handleSearch() {
-    const trimmed = query.trim();
+  async function performSearch(searchMode: SearchMode, searchQuery: string) {
+    const trimmed = searchQuery.trim();
     if (!trimmed) return;
 
     setLoading(true);
@@ -91,7 +95,7 @@ export default function SearchPage() {
     setSearched(true);
 
     try {
-      if (mode === "userId") {
+      if (searchMode === "userId") {
         const seqId = parseInt(trimmed, 10);
         if (isNaN(seqId)) {
           setError("ユーザーIDは数字で入力してください");
@@ -170,6 +174,22 @@ export default function SearchPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  // URL パラメータが変わるたびにハッシュタグ検索を実行する
+  useEffect(() => {
+    const m = searchParams.get("mode");
+    const q = searchParams.get("q");
+    if (m === "hashtag" && q) {
+      setMode("hashtag");
+      setQuery(q);
+      performSearch("hashtag", q);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
+  function handleSearch() {
+    performSearch(mode, query);
   }
 
   return (

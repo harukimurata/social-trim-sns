@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import MarkdownContent from "./MarkdownContent";
 import {
   HiOutlineStar,
@@ -50,9 +51,15 @@ export default function PostContent({
   onPostClick,
   onAvatarClick,
 }: PostData) {
+  const router = useRouter();
   const [currentImage, setCurrentImage] = useState(0);
   const [zoomedIndex, setZoomedIndex] = useState<number | null>(null);
   const [showOriginal, setShowOriginal] = useState(false);
+
+  const handleHashtagClick = useCallback(
+    (tag: string) => router.push(`/search?mode=hashtag&q=${encodeURIComponent(tag)}`),
+    [router]
+  );
 
   const displayContent =
     isEdited && showOriginal && originalContent ? originalContent : content;
@@ -206,6 +213,7 @@ export default function PostContent({
                 <span
                   key={i}
                   className="text-xs text-fg-brand hover:underline cursor-pointer"
+                  onClick={() => handleHashtagClick(tag)}
                 >
                   #{tag}
                 </span>

@@ -751,7 +751,11 @@ export default function ProfilePage() {
                       {post.hashtags.length > 0 && (
                         <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
                           {post.hashtags.map((tag, i) => (
-                            <span key={i} className="text-xs text-blue-500">
+                            <span
+                              key={i}
+                              className="text-xs text-blue-500 hover:underline cursor-pointer"
+                              onClick={() => router.push(`/search?mode=hashtag&q=${encodeURIComponent(tag)}`)}
+                            >
                               #{tag}
                             </span>
                           ))}
