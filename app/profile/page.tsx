@@ -10,7 +10,7 @@ import { useSetAtom } from "jotai";
 import { avatarAtom } from "@/lib/atoms/avatarAtom";
 import { useRouter } from "next/navigation";
 import PostContent from "@/app/components/PostContent";
-import { HiPencil, HiCamera, HiX, HiLockClosed, HiLockOpen, HiOutlineLightningBolt } from "react-icons/hi";
+import { HiPencil, HiCamera, HiX, HiLockClosed, HiLockOpen, HiOutlineLightningBolt, HiLightningBolt } from "react-icons/hi";
 import { HiOutlineStar, HiStar } from "react-icons/hi2";
 import { FaRegComment } from "react-icons/fa";
 
@@ -62,6 +62,8 @@ type FavoritePost = {
   avatarUrl?: string;
 };
 
+type ViralPost = FavoritePost;
+
 function formatRelativeDate(isoString: string): string {
   const diffMs = Date.now() - new Date(isoString).getTime();
   const diffMins = Math.floor(diffMs / 60000);
@@ -110,7 +112,7 @@ export default function ProfilePage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // タブ状態
-  const [activeTab, setActiveTab] = useState<"posts" | "favorites">("posts");
+  const [activeTab, setActiveTab] = useState<"posts" | "favorites" | "virals">("posts");
 
   // 投稿状態
   const [posts, setPosts] = useState<ProfilePost[]>([]);
@@ -127,6 +129,12 @@ export default function ProfilePage() {
   const [favoritesLoading, setFavoritesLoading] = useState(false);
   const [favoritesLoaded, setFavoritesLoaded] = useState(false);
   const [favoritedIds, setFavoritedIds] = useState<Set<string>>(new Set());
+
+  // バイラル状態
+  const [viralPosts, setViralPosts] = useState<ViralPost[]>([]);
+  const [viralsLoading, setViralsLoading] = useState(false);
+  const [viralsLoaded, setViralsLoaded] = useState(false);
+  const [viraledIds, setViraledIds] = useState<Set<string>>(new Set());
 
   // マウント時にプロフィールと投稿を並列取得する
   useEffect(() => {
@@ -179,10 +187,13 @@ export default function ProfilePage() {
           }))
         );
 
-        // 現在ユーザーのお気に入りIDを取得する
+        // 現在ユーザーのリアクションIDを取得する
         const { data: reactions } = await client.models.UserReaction.listUserReactionByUserId({ userId });
         setFavoritedIds(
           new Set((reactions ?? []).filter((r) => r.type === "FAVORITE").map((r) => r.postId))
+        );
+        setViraledIds(
+          new Set((reactions ?? []).filter((r) => r.type === "VIRAL").map((r) => r.postId))
         );
       } catch {
         setError("プロフィールの取得に失敗しました");
@@ -501,6 +512,78 @@ export default function ProfilePage() {
     }
   }, [profile]);
 
+  const fetchVirals = useCallback(async () => {
+    if (!profile) return;
+    setViralsLoading(true);
+    try {
+      const { data: reactions } = await client.models.UserReaction.listUserReactionByUserId({
+        userId: profile.userId,
+      });
+      const viralReactions = (reactions ?? []).filter((r) => r.type === "VIRAL");
+      setViraledIds(new Set(viralReactions.map((r) => r.postId)));
+
+      const posts = await Promise.all(
+        viralReactions.map(async (r) => {
+          const { data: post } = await client.models.Post.get({ id: r.postId });
+          return post ?? null;
+        })
+      );
+      const validPosts = posts.filter((p): p is NonNullable<typeof p> => !!p);
+
+      const uniqueUserIds = [...new Set(validPosts.map((p) => p.userId))];
+      const userMap = new Map<string, { username: string; avatarUrl: string }>();
+      await Promise.all(
+        uniqueUserIds.map(async (uid) => {
+          const { data: user } = await client.models.User.get({ userId: uid });
+          if (user) {
+            const avatarUrl = user.avatarUrl
+              ? await getUrl({ path: user.avatarUrl }).then(({ url }) => url.toString()).catch(() => "")
+              : "";
+            userMap.set(uid, { username: user.username, avatarUrl });
+          }
+        })
+      );
+
+      const resolvedImages = await Promise.all(
+        validPosts.map(async (post) => {
+          const paths = post.imageUrls?.filter((p): p is string => !!p) ?? [];
+          return Promise.all(paths.map((path) => getUrl({ path }).then(({ url }) => url.toString()).catch(() => "")));
+        })
+      );
+
+      setViralPosts(
+        validPosts
+          .map((post, i) => {
+            const user = userMap.get(post.userId);
+            const username = user?.username ?? "Unknown";
+            return {
+              id: post.id,
+              userId: post.userId,
+              content: post.content,
+              originalContent: post.originalContent,
+              isEdited: post.isEdited ?? false,
+              imageUrls: resolvedImages[i].filter(Boolean),
+              hashtags: post.hashtags?.filter((h): h is string => !!h) ?? [],
+              favoriteCount: post.favoriteCount ?? 0,
+              viralCount: post.viralCount ?? 0,
+              ttl: post.ttl,
+              isProtected: post.isProtected ?? false,
+              createdAt: post.createdAt ?? "",
+              username,
+              userInitial: username[0]?.toUpperCase() ?? "?",
+              avatarUrl: user?.avatarUrl || undefined,
+            };
+          })
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      );
+      setViralsLoaded(true);
+    } catch {
+      // フェッチ失敗時はリストを空にする
+    } finally {
+      setViralsLoading(false);
+    }
+  }, [profile]);
+
   const handleFavoriteToggle = useCallback(async (postId: string, currentlyFavorited: boolean) => {
     if (!profile) return;
     if (currentlyFavorited) {
@@ -521,11 +604,36 @@ export default function ProfilePage() {
     );
   }, [profile]);
 
+  const handleViralToggle = useCallback(async (postId: string, currentlyViraled: boolean) => {
+    if (!profile) return;
+    if (currentlyViraled) {
+      await client.models.UserReaction.delete({ userId: profile.userId, postId });
+      setViraledIds((prev) => { const next = new Set(prev); next.delete(postId); return next; });
+      setViralPosts((prev) => prev.filter((p) => p.id !== postId));
+    } else {
+      await client.models.UserReaction.create({ userId: profile.userId, postId, type: "VIRAL" });
+      setViraledIds((prev) => new Set(prev).add(postId));
+    }
+    setPosts((prev) =>
+      prev.map((p) =>
+        p.id === postId
+          ? { ...p, viralCount: Math.max(0, p.viralCount + (currentlyViraled ? -1 : 1)) }
+          : p
+      )
+    );
+  }, [profile]);
+
   useEffect(() => {
     if (activeTab === "favorites" && !favoritesLoaded && profile) {
       fetchFavorites();
     }
   }, [activeTab, favoritesLoaded, profile, fetchFavorites]);
+
+  useEffect(() => {
+    if (activeTab === "virals" && !viralsLoaded && profile) {
+      fetchVirals();
+    }
+  }, [activeTab, viralsLoaded, profile, fetchVirals]);
 
   if (loading) {
     return (
@@ -798,7 +906,7 @@ export default function ProfilePage() {
         </div>
       )}
 
-      {/* 投稿/お気に入りタブ */}
+      {/* 投稿/お気に入り/バイラルタブ */}
       {!editing && (
         <section className="border-t border-default mt-2">
           <div className="flex border-b border-default">
@@ -819,6 +927,15 @@ export default function ProfilePage() {
                 }`}
             >
               お気に入り
+            </button>
+            <button
+              onClick={() => setActiveTab("virals")}
+              className={`flex-1 py-3 text-sm font-semibold transition-colors ${activeTab === "virals"
+                ? "text-brand border-b-2 border-brand"
+                : "text-gray-500 hover:text-gray-700"
+                }`}
+            >
+              バイラル
             </button>
           </div>
 
@@ -932,10 +1049,16 @@ export default function ProfilePage() {
                               {favoritedIds.has(post.id) ? <HiStar size={16} /> : <HiOutlineStar size={16} />}
                               {post.favoriteCount > 0 && <span>{post.favoriteCount}</span>}
                             </button>
-                            <span className="flex items-center gap-1 text-xs text-gray-400">
-                              <HiOutlineLightningBolt size={16} />
+                            <button
+                              onClick={() => handleViralToggle(post.id, viraledIds.has(post.id))}
+                              className={`flex items-center gap-1 text-xs transition-colors ${viraledIds.has(post.id)
+                                ? "text-green-500"
+                                : "text-gray-400 hover:text-green-500"
+                                }`}
+                            >
+                              {viraledIds.has(post.id) ? <HiLightningBolt size={16} /> : <HiOutlineLightningBolt size={16} />}
                               {post.viralCount > 0 && <span>{post.viralCount}</span>}
-                            </span>
+                            </button>
                           </div>
 
                           <div className="mt-2 flex items-center justify-between">
@@ -1017,7 +1140,48 @@ export default function ProfilePage() {
                       favoriteCount={post.favoriteCount}
                       viralCount={post.viralCount}
                       isFavorited={favoritedIds.has(post.id)}
+                      isViraled={viraledIds.has(post.id)}
                       onFavoriteToggle={handleFavoriteToggle}
+                      onViralToggle={handleViralToggle}
+                      onPostClick={() => router.push(`/post/${post.id}`)}
+                      onAvatarClick={() => router.push(`/profile/${post.userId}`)}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* バイラルタブ */}
+          {activeTab === "virals" && (
+            <div>
+              {viralsLoading ? (
+                <p className="text-gray-400 text-sm py-4">読み込み中...</p>
+              ) : viralPosts.length === 0 ? (
+                <p className="text-gray-400 text-sm py-4">バイラルした投稿はありません</p>
+              ) : (
+                <div>
+                  {viralPosts.map((post) => (
+                    <PostContent
+                      key={post.id}
+                      postId={post.id}
+                      userId={post.userId}
+                      content={post.content}
+                      originalContent={post.originalContent ?? undefined}
+                      isEdited={post.isEdited}
+                      hashtags={post.hashtags}
+                      imageUrls={post.imageUrls}
+                      username={post.username}
+                      userInitial={post.userInitial}
+                      avatarUrl={post.avatarUrl}
+                      createdAt={post.createdAt ? formatRelativeDate(post.createdAt) : undefined}
+                      favoriteCount={post.favoriteCount}
+                      viralCount={post.viralCount}
+                      isFavorited={favoritedIds.has(post.id)}
+                      isViraled={viraledIds.has(post.id)}
+                      viralByUsername={profile.username}
+                      onFavoriteToggle={handleFavoriteToggle}
+                      onViralToggle={handleViralToggle}
                       onPostClick={() => router.push(`/post/${post.id}`)}
                       onAvatarClick={() => router.push(`/profile/${post.userId}`)}
                     />

@@ -79,6 +79,7 @@ export default function SearchPage() {
   const [searched, setSearched] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [favoritedPostIds, setFavoritedPostIds] = useState<Set<string>>(new Set());
+  const [viraledPostIds, setViraledPostIds] = useState<Set<string>>(new Set());
 
   function switchMode(next: SearchMode) {
     setMode(next);
@@ -87,6 +88,7 @@ export default function SearchPage() {
     setPosts([]);
     setSearched(false);
     setFavoritedPostIds(new Set());
+    setViraledPostIds(new Set());
   }
 
   async function performSearch(searchMode: SearchMode, searchQuery: string) {
@@ -175,10 +177,13 @@ export default function SearchPage() {
           })
         );
 
-        // 現在ログイン中ユーザーのお気に入りを取得してSetを構築する
+        // 現在ログイン中ユーザーのリアクションを取得してSetを構築する
         const { data: reactions } = await client.models.UserReaction.listUserReactionByUserId({ userId });
         setFavoritedPostIds(
           new Set((reactions ?? []).filter((r) => r.type === "FAVORITE").map((r) => r.postId))
+        );
+        setViraledPostIds(
+          new Set((reactions ?? []).filter((r) => r.type === "VIRAL").map((r) => r.postId))
         );
       }
     } catch (e) {
@@ -197,6 +202,17 @@ export default function SearchPage() {
     } else {
       await client.models.UserReaction.create({ userId: currentUserId, postId, type: "FAVORITE" });
       setFavoritedPostIds((prev) => new Set(prev).add(postId));
+    }
+  }, [currentUserId]);
+
+  const handleViralToggle = useCallback(async (postId: string, currentlyViraled: boolean) => {
+    if (!currentUserId) return;
+    if (currentlyViraled) {
+      await client.models.UserReaction.delete({ userId: currentUserId, postId });
+      setViraledPostIds((prev) => { const next = new Set(prev); next.delete(postId); return next; });
+    } else {
+      await client.models.UserReaction.create({ userId: currentUserId, postId, type: "VIRAL" });
+      setViraledPostIds((prev) => new Set(prev).add(postId));
     }
   }, [currentUserId]);
 
@@ -304,9 +320,11 @@ export default function SearchPage() {
                 }
                 isProtected={post.isProtected}
                 isFavorited={favoritedPostIds.has(post.id)}
+                isViraled={viraledPostIds.has(post.id)}
                 onPostClick={() => router.push(`/post/${post.id}`)}
                 onAvatarClick={() => router.push(`/profile/${post.userId}`)}
                 onFavoriteToggle={handleFavoriteToggle}
+                onViralToggle={handleViralToggle}
               />
             ))}
           </div>

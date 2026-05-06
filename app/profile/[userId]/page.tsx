@@ -103,13 +103,16 @@ export default function UserProfilePage() {
   const [followLoading, setFollowLoading] = useState(false);
   const [followError, setFollowError] = useState("");
 
-  // タブ・お気に入り関連
-  const [activeTab, setActiveTab] = useState<"posts" | "favorites">("posts");
+  // タブ・お気に入り・バイラル関連
+  const [activeTab, setActiveTab] = useState<"posts" | "favorites" | "virals">("posts");
   const [favoritePosts, setFavoritePosts] = useState<ProfilePost[]>([]);
   const [favoritesLoading, setFavoritesLoading] = useState(false);
   const [favoritesLoaded, setFavoritesLoaded] = useState(false);
-  // 現在ログイン中ユーザーがお気に入りしている投稿ID（両タブの isFavorited 用）
   const [currentUserFavIds, setCurrentUserFavIds] = useState<Set<string>>(new Set());
+  const [viralPosts, setViralPosts] = useState<ProfilePost[]>([]);
+  const [viralsLoading, setViralsLoading] = useState(false);
+  const [viralsLoaded, setViralsLoaded] = useState(false);
+  const [currentUserViralIds, setCurrentUserViralIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (!userId) return;
@@ -158,12 +161,15 @@ export default function UserProfilePage() {
           setIsFollowing(!!followRecord.data);
         }
 
-        // 現在ログイン中ユーザーのお気に入りIDを取得する
+        // 現在ログイン中ユーザーのリアクションIDを取得する
         const { data: myReactions } = await client.models.UserReaction.listUserReactionByUserId({
           userId: currentUser.userId,
         });
         setCurrentUserFavIds(
           new Set((myReactions ?? []).filter((r) => r.type === "FAVORITE").map((r) => r.postId))
+        );
+        setCurrentUserViralIds(
+          new Set((myReactions ?? []).filter((r) => r.type === "VIRAL").map((r) => r.postId))
         );
 
         // 投稿の画像URLを並列解決して新着順にソート
@@ -252,6 +258,53 @@ export default function UserProfilePage() {
     }
   }, [userId]);
 
+  const fetchVirals = useCallback(async () => {
+    if (!userId) return;
+    setViralsLoading(true);
+    try {
+      const { data: reactions } = await client.models.UserReaction.listUserReactionByUserId({ userId });
+      const viralReactions = (reactions ?? []).filter((r) => r.type === "VIRAL");
+
+      const rawPosts = await Promise.all(
+        viralReactions.map(async (r) => {
+          const { data: post } = await client.models.Post.get({ id: r.postId });
+          return post ?? null;
+        })
+      );
+      const validPosts = rawPosts
+        .filter((p): p is NonNullable<typeof p> => !!p)
+        .sort((a, b) => new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime());
+
+      const resolvedImages = await Promise.all(
+        validPosts.map(async (post) => {
+          const paths = post.imageUrls?.filter((p): p is string => !!p) ?? [];
+          return Promise.all(paths.map(resolveS3Url));
+        })
+      );
+
+      setViralPosts(
+        validPosts.map((post, i) => ({
+          id: post.id,
+          content: post.content,
+          originalContent: post.originalContent,
+          isEdited: post.isEdited ?? false,
+          imageUrls: resolvedImages[i].filter(Boolean),
+          hashtags: post.hashtags?.filter((h): h is string => !!h) ?? [],
+          favoriteCount: post.favoriteCount ?? 0,
+          viralCount: post.viralCount ?? 0,
+          ttl: post.ttl,
+          isProtected: post.isProtected ?? false,
+          createdAt: post.createdAt ?? "",
+        }))
+      );
+      setViralsLoaded(true);
+    } catch {
+      // フェッチ失敗時はリストを空にする
+    } finally {
+      setViralsLoading(false);
+    }
+  }, [userId]);
+
   const handleFavoriteToggle = useCallback(async (postId: string, currentlyFavorited: boolean) => {
     if (!currentUserId) return;
     if (currentlyFavorited) {
@@ -263,11 +316,28 @@ export default function UserProfilePage() {
     }
   }, [currentUserId]);
 
+  const handleViralToggle = useCallback(async (postId: string, currentlyViraled: boolean) => {
+    if (!currentUserId) return;
+    if (currentlyViraled) {
+      await client.models.UserReaction.delete({ userId: currentUserId, postId });
+      setCurrentUserViralIds((prev) => { const next = new Set(prev); next.delete(postId); return next; });
+    } else {
+      await client.models.UserReaction.create({ userId: currentUserId, postId, type: "VIRAL" });
+      setCurrentUserViralIds((prev) => new Set(prev).add(postId));
+    }
+  }, [currentUserId]);
+
   useEffect(() => {
     if (activeTab === "favorites" && !favoritesLoaded) {
       fetchFavorites();
     }
   }, [activeTab, favoritesLoaded, fetchFavorites]);
+
+  useEffect(() => {
+    if (activeTab === "virals" && !viralsLoaded) {
+      fetchVirals();
+    }
+  }, [activeTab, viralsLoaded, fetchVirals]);
 
   async function handleFollowToggle() {
     if (!currentUserId || !profile || currentUserId === profile.userId) return;
@@ -443,7 +513,7 @@ export default function UserProfilePage() {
         </div>
       </div>
 
-      {/* 投稿/お気に入りタブ */}
+      {/* 投稿/お気に入り/バイラルタブ */}
       <div className="flex border-b border-gray-100">
         <button
           onClick={() => setActiveTab("posts")}
@@ -462,6 +532,15 @@ export default function UserProfilePage() {
             }`}
         >
           お気に入り
+        </button>
+        <button
+          onClick={() => setActiveTab("virals")}
+          className={`flex-1 py-3 text-sm font-semibold transition-colors ${activeTab === "virals"
+            ? "text-brand border-b-2 border-brand"
+            : "text-gray-500 hover:text-gray-700"
+            }`}
+        >
+          バイラル
         </button>
       </div>
 
@@ -488,7 +567,9 @@ export default function UserProfilePage() {
                 favoriteCount={post.favoriteCount}
                 viralCount={post.viralCount}
                 isFavorited={currentUserFavIds.has(post.id)}
+                isViraled={currentUserViralIds.has(post.id)}
                 onFavoriteToggle={currentUserId && !isSelf ? handleFavoriteToggle : undefined}
+                onViralToggle={currentUserId && !isSelf ? handleViralToggle : undefined}
                 deletionScheduledAt={
                   post.isProtected
                     ? null
@@ -530,7 +611,46 @@ export default function UserProfilePage() {
                 favoriteCount={post.favoriteCount}
                 viralCount={post.viralCount}
                 isFavorited={currentUserFavIds.has(post.id)}
+                isViraled={currentUserViralIds.has(post.id)}
                 onFavoriteToggle={currentUserId ? handleFavoriteToggle : undefined}
+                onViralToggle={currentUserId ? handleViralToggle : undefined}
+                onPostClick={() => router.push(`/post/${post.id}`)}
+                onAvatarClick={() => router.push(`/profile/${profile.userId}`)}
+              />
+            ))}
+          </div>
+        )
+      )}
+
+      {/* バイラルタブ */}
+      {activeTab === "virals" && (
+        viralsLoading ? (
+          <p className="px-4 py-8 text-center text-sm text-gray-400">読み込み中...</p>
+        ) : viralPosts.length === 0 ? (
+          <p className="px-4 py-8 text-center text-sm text-gray-400">バイラルした投稿はありません</p>
+        ) : (
+          <div>
+            {viralPosts.map((post) => (
+              <PostContent
+                key={post.id}
+                postId={post.id}
+                userId={post.id}
+                content={post.content}
+                originalContent={post.originalContent ?? undefined}
+                isEdited={post.isEdited}
+                hashtags={post.hashtags}
+                imageUrls={post.imageUrls}
+                username={profile.username}
+                userInitial={avatarInitial}
+                avatarUrl={profile.avatarUrl}
+                createdAt={post.createdAt ? formatRelativeDate(post.createdAt) : undefined}
+                favoriteCount={post.favoriteCount}
+                viralCount={post.viralCount}
+                isFavorited={currentUserFavIds.has(post.id)}
+                isViraled={currentUserViralIds.has(post.id)}
+                viralByUsername={profile.username}
+                onFavoriteToggle={currentUserId ? handleFavoriteToggle : undefined}
+                onViralToggle={currentUserId ? handleViralToggle : undefined}
                 onPostClick={() => router.push(`/post/${post.id}`)}
                 onAvatarClick={() => router.push(`/profile/${profile.userId}`)}
               />

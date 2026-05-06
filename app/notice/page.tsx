@@ -6,6 +6,7 @@ import { getCurrentUser } from "aws-amplify/auth";
 import { generateClient } from "aws-amplify/data";
 import type { Schema } from "@/amplify/data/resource";
 import { HiOutlineStar } from "react-icons/hi2";
+import { HiOutlineLightningBolt } from "react-icons/hi";
 
 const client = generateClient<Schema>();
 
@@ -116,13 +117,16 @@ export default function NoticePage() {
                 !notif.isRead ? "bg-blue-50/40" : ""
               }`}
             >
-              <div className="mt-0.5 text-red-400 shrink-0">
-                <HiOutlineStar size={18} />
+              <div className={`mt-0.5 shrink-0 ${notif.type === "VIRAL" ? "text-green-500" : "text-red-400"}`}>
+                {notif.type === "VIRAL"
+                  ? <HiOutlineLightningBolt size={18} />
+                  : <HiOutlineStar size={18} />}
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm text-gray-800 break-words">
                   <span className="font-semibold">{notif.senderName}</span>
                   {notif.type === "FAVORITE" && " さんがあなたの投稿をお気に入りしました"}
+                  {notif.type === "VIRAL" && " さんがあなたの投稿をバイラルしました"}
                 </p>
                 {notif.createdAt && (
                   <p className="text-xs text-gray-400 mt-0.5">
