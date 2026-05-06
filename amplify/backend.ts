@@ -4,6 +4,7 @@ import { data } from "./data/resource.js";
 import { postConfirmation } from "./auth/post-confirmation/resource.js";
 import { postStreamHandler } from "./functions/post-stream-handler/resource.js";
 import { followStreamHandler } from "./functions/follow-stream-handler/resource.js";
+import { userReactionStreamHandler } from "./functions/user-reaction-stream-handler/resource.js";
 import { storage } from "./storage/resource.js";
 import { Stack, CfnResource } from "aws-cdk-lib";
 import { Function as LambdaFunction, CfnEventSourceMapping } from "aws-cdk-lib/aws-lambda";
@@ -17,6 +18,7 @@ const backend = defineBackend({
   postConfirmation,
   postStreamHandler,
   followStreamHandler,
+  userReactionStreamHandler,
   storage,
 });
 
@@ -29,6 +31,8 @@ const dataStack = Stack.of(tables["Counter"]);
 
 const COUNTER_TABLE_SSM = "/social-trim-sns/counter-table-name";
 const USER_TABLE_SSM = "/social-trim-sns/user-table-name";
+const POST_TABLE_SSM = "/social-trim-sns/post-table-name";
+const NOTIFICATION_TABLE_SSM = "/social-trim-sns/notification-table-name";
 
 new StringParameter(dataStack, "CounterTableNameSsm", {
   parameterName: COUNTER_TABLE_SSM,
@@ -38,6 +42,16 @@ new StringParameter(dataStack, "CounterTableNameSsm", {
 new StringParameter(dataStack, "UserTableNameSsm", {
   parameterName: USER_TABLE_SSM,
   stringValue: tables["User"].tableName,
+});
+
+new StringParameter(dataStack, "PostTableNameSsm", {
+  parameterName: POST_TABLE_SSM,
+  stringValue: tables["Post"].tableName,
+});
+
+new StringParameter(dataStack, "NotificationTableNameSsm", {
+  parameterName: NOTIFICATION_TABLE_SSM,
+  stringValue: tables["Notification"].tableName,
 });
 
 // ── post-confirmation Lambda ──────────────────────────────────────────────
@@ -166,3 +180,55 @@ followStreamLambda.addToRolePolicy(
 );
 
 followStreamLambda.addEnvironment("USER_TABLE_SSM_PATH", USER_TABLE_SSM);
+
+// ── user-reaction-stream-handler Lambda ───────────────────────────────────
+const userReactionStreamLambda = backend.userReactionStreamHandler.resources.lambda as LambdaFunction;
+
+const userReactionTableWrapper = amplifyDynamoDbTables["UserReaction"];
+userReactionTableWrapper.streamSpecification = { streamViewType: StreamViewType.NEW_AND_OLD_IMAGES };
+const userReactionCfnResource = (userReactionTableWrapper as any).resource as CfnResource;
+
+new CfnEventSourceMapping(Stack.of(userReactionCfnResource), "UserReactionStreamToLambda", {
+  functionName: userReactionStreamLambda.functionArn,
+  eventSourceArn: userReactionCfnResource.getAtt("TableStreamArn").toString(),
+  startingPosition: "LATEST",
+  filterCriteria: {
+    filters: [{ pattern: JSON.stringify({ eventName: ["INSERT", "REMOVE"] }) }],
+  },
+});
+
+userReactionStreamLambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: [
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:DescribeStream",
+      "dynamodb:ListStreams",
+    ],
+    resources: ["arn:aws:dynamodb:*:*:table/UserReaction-*/stream/*"],
+  })
+);
+
+userReactionStreamLambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ["dynamodb:GetItem", "dynamodb:UpdateItem"],
+    resources: ["arn:aws:dynamodb:*:*:table/Post-*"],
+  })
+);
+
+userReactionStreamLambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ["dynamodb:PutItem"],
+    resources: ["arn:aws:dynamodb:*:*:table/Notification-*"],
+  })
+);
+
+userReactionStreamLambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ["ssm:GetParameter"],
+    resources: ["arn:aws:ssm:*:*:parameter/social-trim-sns/*"],
+  })
+);
+
+userReactionStreamLambda.addEnvironment("POST_TABLE_SSM_PATH", POST_TABLE_SSM);
+userReactionStreamLambda.addEnvironment("NOTIFICATION_TABLE_SSM_PATH", NOTIFICATION_TABLE_SSM);

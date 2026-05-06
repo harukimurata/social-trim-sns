@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { generateClient } from "aws-amplify/data";
+import { getCurrentUser } from "aws-amplify/auth";
 import { getUrl } from "aws-amplify/storage";
 import type { Schema } from "@/amplify/data/resource";
 import PostContent from "@/app/components/PostContent";
@@ -94,6 +95,8 @@ export default function PostDetailPage() {
   const [comments, setComments] = useState<CommentItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [isFavorited, setIsFavorited] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -102,18 +105,25 @@ export default function PostDetailPage() {
       setLoading(true);
       setError("");
       try {
-        // 投稿を取得
-        const { data: rawPost } = await client.models.Post.get({ id });
+        // 現在のログインユーザーと投稿を並列取得
+        const [{ userId: loginUserId }, { data: rawPost }] = await Promise.all([
+          getCurrentUser(),
+          client.models.Post.get({ id }),
+        ]);
+        setCurrentUserId(loginUserId);
+
         if (!rawPost) {
           setError("投稿が見つかりません");
           return;
         }
 
-        // 投稿者情報とコメント一覧を並列フェッチ
-        const [userData, commentsData] = await Promise.all([
+        // 投稿者情報・コメント一覧・自分のリアクションを並列フェッチ
+        const [userData, commentsData, reactionData] = await Promise.all([
           client.models.User.get({ userId: rawPost.userId }),
           client.models.Comment.listCommentByPostIdAndPostedAt({ postId: rawPost.id }),
+          client.models.UserReaction.get({ userId: loginUserId, postId: rawPost.id }),
         ]);
+        setIsFavorited(!!reactionData.data && reactionData.data.type === "FAVORITE");
 
         const user = userData.data;
         const avatarUrl = user?.avatarUrl ? await resolveS3Url(user.avatarUrl) : "";
@@ -216,6 +226,17 @@ export default function PostDetailPage() {
     fetchPostAndComments();
   }, [id]);
 
+  async function handleFavoriteToggle(postId: string, currentlyFavorited: boolean) {
+    if (!currentUserId) return;
+    if (currentlyFavorited) {
+      await client.models.UserReaction.delete({ userId: currentUserId, postId });
+      setIsFavorited(false);
+    } else {
+      await client.models.UserReaction.create({ userId: currentUserId, postId, type: "FAVORITE" });
+      setIsFavorited(true);
+    }
+  }
+
   if (loading) {
     return (
       <main className="px-4 py-6">
@@ -278,6 +299,8 @@ export default function PostDetailPage() {
               : undefined
         }
         isProtected={post.isProtected}
+        isFavorited={isFavorited}
+        onFavoriteToggle={currentUserId ? handleFavoriteToggle : undefined}
         onAvatarClick={() => router.push(`/profile/${post.userId}`)}
       />
 

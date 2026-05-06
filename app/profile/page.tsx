@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import MarkdownContent from "@/app/components/MarkdownContent";
 import { getCurrentUser, fetchAuthSession } from "aws-amplify/auth";
 import { uploadData, getUrl, remove } from "aws-amplify/storage";
@@ -9,7 +9,10 @@ import type { Schema } from "@/amplify/data/resource";
 import { useSetAtom } from "jotai";
 import { avatarAtom } from "@/lib/atoms/avatarAtom";
 import { useRouter } from "next/navigation";
-import { HiPencil, HiCamera, HiX, HiLockClosed, HiLockOpen } from "react-icons/hi";
+import PostContent from "@/app/components/PostContent";
+import { HiPencil, HiCamera, HiX, HiLockClosed, HiLockOpen, HiOutlineLightningBolt } from "react-icons/hi";
+import { HiOutlineStar, HiStar } from "react-icons/hi2";
+import { FaRegComment } from "react-icons/fa";
 
 const client = generateClient<Schema>();
 
@@ -39,6 +42,24 @@ type ProfilePost = {
   ttl?: number | null;
   isProtected: boolean;
   createdAt: string;
+};
+
+type FavoritePost = {
+  id: string;
+  userId: string;
+  content: string;
+  originalContent?: string | null;
+  isEdited: boolean;
+  imageUrls: string[];
+  hashtags: string[];
+  favoriteCount: number;
+  viralCount: number;
+  ttl?: number | null;
+  isProtected: boolean;
+  createdAt: string;
+  username: string;
+  userInitial: string;
+  avatarUrl?: string;
 };
 
 function formatRelativeDate(isoString: string): string {
@@ -88,6 +109,9 @@ export default function ProfilePage() {
   const [error, setError] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // タブ状態
+  const [activeTab, setActiveTab] = useState<"posts" | "favorites">("posts");
+
   // 投稿状態
   const [posts, setPosts] = useState<ProfilePost[]>([]);
   const [postsLoading, setPostsLoading] = useState(true);
@@ -97,6 +121,12 @@ export default function ProfilePage() {
   const [protectingPostId, setProtectingPostId] = useState<string | null>(null);
   const [postError, setPostError] = useState("");
   const [showOriginalMap, setShowOriginalMap] = useState<Record<string, boolean>>({});
+
+  // お気に入り状態
+  const [favoritePosts, setFavoritePosts] = useState<FavoritePost[]>([]);
+  const [favoritesLoading, setFavoritesLoading] = useState(false);
+  const [favoritesLoaded, setFavoritesLoaded] = useState(false);
+  const [favoritedIds, setFavoritedIds] = useState<Set<string>>(new Set());
 
   // マウント時にプロフィールと投稿を並列取得する
   useEffect(() => {
@@ -147,6 +177,12 @@ export default function ProfilePage() {
             isProtected: p.isProtected ?? false,
             createdAt: p.createdAt ?? "",
           }))
+        );
+
+        // 現在ユーザーのお気に入りIDを取得する
+        const { data: reactions } = await client.models.UserReaction.listUserReactionByUserId({ userId });
+        setFavoritedIds(
+          new Set((reactions ?? []).filter((r) => r.type === "FAVORITE").map((r) => r.postId))
         );
       } catch {
         setError("プロフィールの取得に失敗しました");
@@ -394,6 +430,102 @@ export default function ProfilePage() {
       setSavingPostEdit(false);
     }
   }
+
+  const fetchFavorites = useCallback(async () => {
+    if (!profile) return;
+    setFavoritesLoading(true);
+    try {
+      const { data: reactions } = await client.models.UserReaction.listUserReactionByUserId({
+        userId: profile.userId,
+      });
+      const favoriteReactions = (reactions ?? []).filter((r) => r.type === "FAVORITE");
+      setFavoritedIds(new Set(favoriteReactions.map((r) => r.postId)));
+
+      const posts = await Promise.all(
+        favoriteReactions.map(async (r) => {
+          const { data: post } = await client.models.Post.get({ id: r.postId });
+          return post ?? null;
+        })
+      );
+      const validPosts = posts.filter((p): p is NonNullable<typeof p> => !!p);
+
+      const uniqueUserIds = [...new Set(validPosts.map((p) => p.userId))];
+      const userMap = new Map<string, { username: string; avatarUrl: string }>();
+      await Promise.all(
+        uniqueUserIds.map(async (uid) => {
+          const { data: user } = await client.models.User.get({ userId: uid });
+          if (user) {
+            const avatarUrl = user.avatarUrl ? await getUrl({ path: user.avatarUrl }).then(({ url }) => url.toString()).catch(() => "") : "";
+            userMap.set(uid, { username: user.username, avatarUrl });
+          }
+        })
+      );
+
+      const resolvedImages = await Promise.all(
+        validPosts.map(async (post) => {
+          const paths = post.imageUrls?.filter((p): p is string => !!p) ?? [];
+          return Promise.all(paths.map((path) => getUrl({ path }).then(({ url }) => url.toString()).catch(() => "")));
+        })
+      );
+
+      setFavoritePosts(
+        validPosts
+          .map((post, i) => {
+            const user = userMap.get(post.userId);
+            const username = user?.username ?? "Unknown";
+            return {
+              id: post.id,
+              userId: post.userId,
+              content: post.content,
+              originalContent: post.originalContent,
+              isEdited: post.isEdited ?? false,
+              imageUrls: resolvedImages[i].filter(Boolean),
+              hashtags: post.hashtags?.filter((h): h is string => !!h) ?? [],
+              favoriteCount: post.favoriteCount ?? 0,
+              viralCount: post.viralCount ?? 0,
+              ttl: post.ttl,
+              isProtected: post.isProtected ?? false,
+              createdAt: post.createdAt ?? "",
+              username,
+              userInitial: username[0]?.toUpperCase() ?? "?",
+              avatarUrl: user?.avatarUrl || undefined,
+            };
+          })
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      );
+      setFavoritesLoaded(true);
+    } catch {
+      // フェッチ失敗時はリストを空にする
+    } finally {
+      setFavoritesLoading(false);
+    }
+  }, [profile]);
+
+  const handleFavoriteToggle = useCallback(async (postId: string, currentlyFavorited: boolean) => {
+    if (!profile) return;
+    if (currentlyFavorited) {
+      await client.models.UserReaction.delete({ userId: profile.userId, postId });
+      setFavoritedIds((prev) => { const next = new Set(prev); next.delete(postId); return next; });
+      setFavoritePosts((prev) => prev.filter((p) => p.id !== postId));
+    } else {
+      await client.models.UserReaction.create({ userId: profile.userId, postId, type: "FAVORITE" });
+      setFavoritedIds((prev) => new Set(prev).add(postId));
+    }
+    // 投稿タブのカウントを楽観的に更新する
+    setPosts((prev) =>
+      prev.map((p) =>
+        p.id === postId
+          ? { ...p, favoriteCount: Math.max(0, p.favoriteCount + (currentlyFavorited ? -1 : 1)) }
+          : p
+      )
+    );
+  }, [profile]);
+
+  useEffect(() => {
+    if (activeTab === "favorites" && !favoritesLoaded && profile) {
+      fetchFavorites();
+    }
+  }, [activeTab, favoritesLoaded, profile, fetchFavorites]);
 
   if (loading) {
     return (
@@ -666,150 +798,236 @@ export default function ProfilePage() {
         </div>
       )}
 
-      {/* 投稿一覧 */}
+      {/* 投稿/お気に入りタブ */}
       {!editing && (
         <section className="border-t border-default mt-2">
-          <h2 className="text-sm font-bold text-gray-500 pt-4 pb-2">投稿</h2>
+          <div className="flex border-b border-default">
+            <button
+              onClick={() => setActiveTab("posts")}
+              className={`flex-1 py-3 text-sm font-semibold transition-colors ${
+                activeTab === "posts"
+                  ? "text-brand border-b-2 border-brand"
+                  : "text-gray-500 hover:text-gray-700"
+              }`}
+            >
+              投稿
+            </button>
+            <button
+              onClick={() => setActiveTab("favorites")}
+              className={`flex-1 py-3 text-sm font-semibold transition-colors ${
+                activeTab === "favorites"
+                  ? "text-brand border-b-2 border-brand"
+                  : "text-gray-500 hover:text-gray-700"
+              }`}
+            >
+              お気に入り
+            </button>
+          </div>
 
-          {postError && (
-            <p className="text-sm text-red-600 mb-3">{postError}</p>
-          )}
-
-          {postsLoading ? (
-            <p className="text-gray-400 text-sm py-4">読み込み中...</p>
-          ) : posts.length === 0 ? (
-            <p className="text-gray-400 text-sm py-4">まだ投稿がありません</p>
-          ) : (
+          {/* 投稿タブ */}
+          {activeTab === "posts" && (
             <div>
-              {posts.map((post) => (
-                <div key={post.id} className="border-b border-gray-100 py-4">
-                  {editingPostId === post.id ? (
-                    /* 編集フォーム */
-                    <div>
-                      <textarea
-                        value={editPostContent}
-                        onChange={(e) => setEditPostContent(e.target.value)}
-                        maxLength={280}
-                        rows={5}
-                        className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-gray-500 transition-colors resize-none"
-                      />
-                      <p className="text-xs text-gray-400 text-right mt-0.5">
-                        {editPostContent.length} / 280
-                      </p>
-                      <div className="flex gap-3 mt-2">
-                        <button
-                          onClick={() => savePostEdit(post)}
-                          disabled={savingPostEdit || !editPostContent.trim()}
-                          className="flex-1 bg-gray-900 hover:bg-gray-700 text-white font-bold py-2 rounded-lg text-sm transition-colors disabled:opacity-50"
-                        >
-                          {savingPostEdit ? "保存中..." : "保存する"}
-                        </button>
-                        <button
-                          onClick={cancelEditPost}
-                          disabled={savingPostEdit}
-                          className="flex-1 border border-gray-300 text-gray-700 font-bold py-2 rounded-lg text-sm hover:bg-gray-50 transition-colors disabled:opacity-50"
-                        >
-                          キャンセル
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    /* 閲覧 + 管理ボタン */
-                    <div>
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-xs text-gray-400">
-                          {post.createdAt ? formatRelativeDate(post.createdAt) : ""}
-                        </span>
-                        {post.isEdited && (
-                          <span className="flex items-center gap-0.5 text-xs text-gray-400">
-                            <HiPencil size={11} />
-                            編集済み
-                          </span>
-                        )}
-                      </div>
+              {postError && (
+                <p className="text-sm text-red-600 mb-3 pt-3">{postError}</p>
+              )}
 
-                      <div className="text-sm text-gray-800 whitespace-pre-wrap break-words leading-relaxed">
-                        <MarkdownContent>{showOriginalMap[post.id] && post.originalContent
-                          ? post.originalContent
-                          : post.content}</MarkdownContent>
-                      </div>
-
-                      {post.isEdited && post.originalContent && (
-                        <button
-                          onClick={() =>
-                            setShowOriginalMap((prev) => ({
-                              ...prev,
-                              [post.id]: !prev[post.id],
-                            }))
-                          }
-                          className="mt-1 text-xs text-blue-500 hover:underline"
-                        >
-                          {showOriginalMap[post.id] ? "編集後を表示" : "編集前を表示"}
-                        </button>
-                      )}
-
-                      {post.hashtags.length > 0 && (
-                        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
-                          {post.hashtags.map((tag, i) => (
-                            <span
-                              key={i}
-                              className="text-xs text-blue-500 hover:underline cursor-pointer"
-                              onClick={() => router.push(`/search?mode=hashtag&q=${encodeURIComponent(tag)}`)}
-                            >
-                              #{tag}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-
-                      <div className="mt-2 flex items-center justify-between">
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() => toggleProtect(post)}
-                            disabled={
-                              protectingPostId === post.id ||
-                              (!post.isProtected && (profile.protectedPostCount ?? 0) >= 5)
-                            }
-                            className={`flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${post.isProtected
-                              ? "border-blue-400 text-blue-500 hover:bg-blue-50"
-                              : "border-gray-300 text-gray-600 hover:bg-gray-50"
-                              }`}
-                          >
-                            {post.isProtected ? (
-                              <HiLockClosed size={12} />
-                            ) : (
-                              <HiLockOpen size={12} />
-                            )}
-                            {protectingPostId === post.id
-                              ? "..."
-                              : post.isProtected
-                                ? "保護解除"
-                                : "保護する"}
-                          </button>
-
-                          {!post.isEdited && (
+              {postsLoading ? (
+                <p className="text-gray-400 text-sm py-4">読み込み中...</p>
+              ) : posts.length === 0 ? (
+                <p className="text-gray-400 text-sm py-4">まだ投稿がありません</p>
+              ) : (
+                <div>
+                  {posts.map((post) => (
+                    <div key={post.id} className="border-b border-gray-100 py-4">
+                      {editingPostId === post.id ? (
+                        /* 編集フォーム */
+                        <div>
+                          <textarea
+                            value={editPostContent}
+                            onChange={(e) => setEditPostContent(e.target.value)}
+                            maxLength={280}
+                            rows={5}
+                            className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-gray-500 transition-colors resize-none"
+                          />
+                          <p className="text-xs text-gray-400 text-right mt-0.5">
+                            {editPostContent.length} / 280
+                          </p>
+                          <div className="flex gap-3 mt-2">
                             <button
-                              onClick={() => startEditPost(post)}
-                              className="flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 transition-colors"
+                              onClick={() => savePostEdit(post)}
+                              disabled={savingPostEdit || !editPostContent.trim()}
+                              className="flex-1 bg-gray-900 hover:bg-gray-700 text-white font-bold py-2 rounded-lg text-sm transition-colors disabled:opacity-50"
                             >
-                              <HiPencil size={12} />
-                              編集
+                              {savingPostEdit ? "保存中..." : "保存する"}
+                            </button>
+                            <button
+                              onClick={cancelEditPost}
+                              disabled={savingPostEdit}
+                              className="flex-1 border border-gray-300 text-gray-700 font-bold py-2 rounded-lg text-sm hover:bg-gray-50 transition-colors disabled:opacity-50"
+                            >
+                              キャンセル
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        /* 閲覧 + 管理ボタン */
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-xs text-gray-400">
+                              {post.createdAt ? formatRelativeDate(post.createdAt) : ""}
+                            </span>
+                            {post.isEdited && (
+                              <span className="flex items-center gap-0.5 text-xs text-gray-400">
+                                <HiPencil size={11} />
+                                編集済み
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="text-sm text-gray-800 whitespace-pre-wrap break-words leading-relaxed">
+                            <MarkdownContent>
+                              {showOriginalMap[post.id] && post.originalContent
+                                ? post.originalContent
+                                : post.content}
+                            </MarkdownContent>
+                          </div>
+
+                          {post.isEdited && post.originalContent && (
+                            <button
+                              onClick={() =>
+                                setShowOriginalMap((prev) => ({
+                                  ...prev,
+                                  [post.id]: !prev[post.id],
+                                }))
+                              }
+                              className="mt-1 text-xs text-blue-500 hover:underline"
+                            >
+                              {showOriginalMap[post.id] ? "編集後を表示" : "編集前を表示"}
                             </button>
                           )}
-                        </div>
 
-                        <span className="text-xs text-gray-400">
-                          {post.isProtected
-                            ? "保護中（自動削除されません）"
-                            : post.ttl
-                              ? `削除予定: ${formatUnixTimestamp(post.ttl)}`
-                              : ""}
-                        </span>
-                      </div>
+                          {post.hashtags.length > 0 && (
+                            <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
+                              {post.hashtags.map((tag, i) => (
+                                <span
+                                  key={i}
+                                  className="text-xs text-blue-500 hover:underline cursor-pointer"
+                                  onClick={() => router.push(`/search?mode=hashtag&q=${encodeURIComponent(tag)}`)}
+                                >
+                                  #{tag}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+
+                          <div className="mt-3 flex gap-5">
+                            <span className="flex items-center gap-1 text-xs text-gray-400">
+                              <FaRegComment size={14} />
+                            </span>
+                            <button
+                              onClick={() => handleFavoriteToggle(post.id, favoritedIds.has(post.id))}
+                              className={`flex items-center gap-1 text-xs transition-colors ${
+                                favoritedIds.has(post.id)
+                                  ? "text-red-400"
+                                  : "text-gray-400 hover:text-red-400"
+                              }`}
+                            >
+                              {favoritedIds.has(post.id) ? <HiStar size={16} /> : <HiOutlineStar size={16} />}
+                              {post.favoriteCount > 0 && <span>{post.favoriteCount}</span>}
+                            </button>
+                            <span className="flex items-center gap-1 text-xs text-gray-400">
+                              <HiOutlineLightningBolt size={16} />
+                              {post.viralCount > 0 && <span>{post.viralCount}</span>}
+                            </span>
+                          </div>
+
+                          <div className="mt-2 flex items-center justify-between">
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => toggleProtect(post)}
+                                disabled={
+                                  protectingPostId === post.id ||
+                                  (!post.isProtected && (profile.protectedPostCount ?? 0) >= 5)
+                                }
+                                className={`flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                                  post.isProtected
+                                    ? "border-blue-400 text-blue-500 hover:bg-blue-50"
+                                    : "border-gray-300 text-gray-600 hover:bg-gray-50"
+                                }`}
+                              >
+                                {post.isProtected ? (
+                                  <HiLockClosed size={12} />
+                                ) : (
+                                  <HiLockOpen size={12} />
+                                )}
+                                {protectingPostId === post.id
+                                  ? "..."
+                                  : post.isProtected
+                                    ? "保護解除"
+                                    : "保護する"}
+                              </button>
+
+                              {!post.isEdited && (
+                                <button
+                                  onClick={() => startEditPost(post)}
+                                  className="flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 transition-colors"
+                                >
+                                  <HiPencil size={12} />
+                                  編集
+                                </button>
+                              )}
+                            </div>
+
+                            <span className="text-xs text-gray-400">
+                              {post.isProtected
+                                ? "保護中（自動削除されません）"
+                                : post.ttl
+                                  ? `削除予定: ${formatUnixTimestamp(post.ttl)}`
+                                  : ""}
+                            </span>
+                          </div>
+                        </div>
+                      )}
                     </div>
-                  )}
+                  ))}
                 </div>
-              ))}
+              )}
+            </div>
+          )}
+
+          {/* お気に入りタブ */}
+          {activeTab === "favorites" && (
+            <div>
+              {favoritesLoading ? (
+                <p className="text-gray-400 text-sm py-4">読み込み中...</p>
+              ) : favoritePosts.length === 0 ? (
+                <p className="text-gray-400 text-sm py-4">お気に入りの投稿はありません</p>
+              ) : (
+                <div>
+                  {favoritePosts.map((post) => (
+                    <PostContent
+                      key={post.id}
+                      postId={post.id}
+                      userId={post.userId}
+                      content={post.content}
+                      originalContent={post.originalContent ?? undefined}
+                      isEdited={post.isEdited}
+                      hashtags={post.hashtags}
+                      imageUrls={post.imageUrls}
+                      username={post.username}
+                      userInitial={post.userInitial}
+                      avatarUrl={post.avatarUrl}
+                      createdAt={post.createdAt ? formatRelativeDate(post.createdAt) : undefined}
+                      favoriteCount={post.favoriteCount}
+                      viralCount={post.viralCount}
+                      isFavorited={favoritedIds.has(post.id)}
+                      onFavoriteToggle={handleFavoriteToggle}
+                      onPostClick={() => router.push(`/post/${post.id}`)}
+                      onAvatarClick={() => router.push(`/profile/${post.userId}`)}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </section>

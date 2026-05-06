@@ -85,6 +85,8 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [fetching, setFetching] = useState(false);
   const [error, setError] = useState("");
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [favoritedPostIds, setFavoritedPostIds] = useState<Set<string>>(new Set());
 
   /**
    * タイムラインを取得する（自分 + フォロー中ユーザーの投稿を新着順で返す）
@@ -96,6 +98,7 @@ export default function App() {
     setError("");
     try {
       const { userId } = await getCurrentUser();
+      setCurrentUserId(userId);
 
       // フォロー中のユーザーIDを取得
       const { data: follows } = await client.models.Follow.list({
@@ -128,6 +131,13 @@ export default function App() {
           }
         })
       );
+
+      // 自分のお気に入りリアクションを取得してSetを構築する
+      const { data: reactions } = await client.models.UserReaction.listUserReactionByUserId({ userId });
+      const favIds = new Set(
+        (reactions ?? []).filter((r) => r.type === "FAVORITE").map((r) => r.postId)
+      );
+      setFavoritedPostIds(favIds);
 
       // コメント数・画像URLを並列解決
       const [commentCounts, resolvedImages] = await Promise.all([
@@ -184,6 +194,17 @@ export default function App() {
     fetchTimeline(true);
   }, [fetchTimeline]);
 
+  const handleFavoriteToggle = useCallback(async (postId: string, currentlyFavorited: boolean) => {
+    if (!currentUserId) return;
+    if (currentlyFavorited) {
+      await client.models.UserReaction.delete({ userId: currentUserId, postId });
+      setFavoritedPostIds((prev) => { const next = new Set(prev); next.delete(postId); return next; });
+    } else {
+      await client.models.UserReaction.create({ userId: currentUserId, postId, type: "FAVORITE" });
+      setFavoritedPostIds((prev) => new Set(prev).add(postId));
+    }
+  }, [currentUserId]);
+
   return (
     <main className="w-full max-w-[600px]">
       {/* 任意のタイミングでリストを更新するフェッチボタン */}
@@ -232,8 +253,10 @@ export default function App() {
                     : undefined
               }
               isProtected={post.isProtected}
+              isFavorited={favoritedPostIds.has(post.id)}
               onPostClick={() => router.push(`/post/${post.id}`)}
               onAvatarClick={() => router.push(`/profile/${post.userId}`)}
+              onFavoriteToggle={handleFavoriteToggle}
             />
           ))}
         </div>
