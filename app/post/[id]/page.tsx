@@ -97,6 +97,7 @@ export default function PostDetailPage() {
   const [error, setError] = useState("");
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [isFavorited, setIsFavorited] = useState(false);
+  const [isViraled, setIsViraled] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -124,6 +125,7 @@ export default function PostDetailPage() {
           client.models.UserReaction.get({ userId: loginUserId, postId: rawPost.id }),
         ]);
         setIsFavorited(!!reactionData.data && reactionData.data.type === "FAVORITE");
+        setIsViraled(!!reactionData.data && reactionData.data.type === "VIRAL");
 
         const user = userData.data;
         const avatarUrl = user?.avatarUrl ? await resolveS3Url(user.avatarUrl) : "";
@@ -237,6 +239,17 @@ export default function PostDetailPage() {
     }
   }
 
+  async function handleViralToggle(postId: string, currentlyViraled: boolean) {
+    if (!currentUserId) return;
+    if (currentlyViraled) {
+      await client.models.UserReaction.delete({ userId: currentUserId, postId });
+      setIsViraled(false);
+    } else {
+      await client.models.UserReaction.create({ userId: currentUserId, postId, type: "VIRAL" });
+      setIsViraled(true);
+    }
+  }
+
   if (loading) {
     return (
       <main className="px-4 py-6">
@@ -300,7 +313,9 @@ export default function PostDetailPage() {
         }
         isProtected={post.isProtected}
         isFavorited={isFavorited}
+        isViraled={isViraled}
         onFavoriteToggle={currentUserId ? handleFavoriteToggle : undefined}
+        onViralToggle={currentUserId ? handleViralToggle : undefined}
         onAvatarClick={() => router.push(`/profile/${post.userId}`)}
       />
 

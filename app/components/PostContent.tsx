@@ -9,7 +9,7 @@ import {
   HiChevronLeft,
   HiChevronRight,
 } from "react-icons/hi2";
-import { HiOutlineLightningBolt, HiPencil } from "react-icons/hi";
+import { HiOutlineLightningBolt, HiLightningBolt, HiPencil } from "react-icons/hi";
 import { FaRegComment } from "react-icons/fa";
 import { IoClose } from "react-icons/io5";
 
@@ -32,9 +32,13 @@ export type PostData = {
   deletionScheduledAt?: string | null;
   isProtected?: boolean;
   isFavorited?: boolean;
+  isViraled?: boolean;
+  /** タイムラインでバイラルした人の名前を表示する場合にセット */
+  viralByUsername?: string;
   onPostClick?: () => void;
   onAvatarClick?: () => void;
   onFavoriteToggle?: (postId: string, currentlyFavorited: boolean) => Promise<void>;
+  onViralToggle?: (postId: string, currentlyViraled: boolean) => Promise<void>;
 };
 
 export default function PostContent({
@@ -53,9 +57,12 @@ export default function PostContent({
   commentCount = 0,
   deletionScheduledAt,
   isFavorited = false,
+  isViraled = false,
+  viralByUsername,
   onPostClick,
   onAvatarClick,
   onFavoriteToggle,
+  onViralToggle,
 }: PostData) {
   const router = useRouter();
   const [currentImage, setCurrentImage] = useState(0);
@@ -64,6 +71,9 @@ export default function PostContent({
   const [localFavorited, setLocalFavorited] = useState(isFavorited);
   const [localFavoriteCount, setLocalFavoriteCount] = useState(favoriteCount);
   const [favoriting, setFavoriting] = useState(false);
+  const [localViraled, setLocalViraled] = useState(isViraled);
+  const [localViralCount, setLocalViralCount] = useState(viralCount);
+  const [viraling, setViraling] = useState(false);
 
   useEffect(() => {
     setLocalFavorited(isFavorited);
@@ -72,6 +82,14 @@ export default function PostContent({
   useEffect(() => {
     setLocalFavoriteCount(favoriteCount);
   }, [favoriteCount]);
+
+  useEffect(() => {
+    setLocalViraled(isViraled);
+  }, [isViraled]);
+
+  useEffect(() => {
+    setLocalViralCount(viralCount);
+  }, [viralCount]);
 
   const handleFavoriteClick = useCallback(async () => {
     if (!onFavoriteToggle || !postId || favoriting) return;
@@ -89,6 +107,23 @@ export default function PostContent({
       setFavoriting(false);
     }
   }, [onFavoriteToggle, postId, favoriting, localFavorited, localFavoriteCount]);
+
+  const handleViralClick = useCallback(async () => {
+    if (!onViralToggle || !postId || viraling) return;
+    setViraling(true);
+    const prevViraled = localViraled;
+    const prevCount = localViralCount;
+    setLocalViraled(!localViraled);
+    setLocalViralCount(localViraled ? Math.max(0, localViralCount - 1) : localViralCount + 1);
+    try {
+      await onViralToggle(postId, localViraled);
+    } catch {
+      setLocalViraled(prevViraled);
+      setLocalViralCount(prevCount);
+    } finally {
+      setViraling(false);
+    }
+  }, [onViralToggle, postId, viraling, localViraled, localViralCount]);
 
   const handleHashtagClick = useCallback(
     (tag: string) => router.push(`/search?mode=hashtag&q=${encodeURIComponent(tag)}`),
@@ -124,10 +159,21 @@ export default function PostContent({
 
   return (
     <div
-      className={`px-4 py-4 border-gray-100 ${onPostClick ? "cursor-pointer hover:bg-gray-50 transition-colors" : ""}`}
+      className={`border-gray-100 ${onPostClick ? "cursor-pointer hover:bg-gray-50 transition-colors" : ""}`}
       onClick={onPostClick}
     >
-      <div className="flex gap-3">
+      {/* バイラルバナー */}
+      {viralByUsername && (
+        <div
+          className="flex items-center gap-1.5 px-4 pt-3 pb-0 text-xs text-green-600"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <HiLightningBolt size={13} />
+          <span>{viralByUsername} さんがバイラル</span>
+        </div>
+      )}
+
+      <div className="flex gap-3 px-4 py-4">
         {/* アバター（クリックでプロフィールへ） */}
         <div
           className={`w-10 h-10 rounded-full bg-brand-500 flex items-center justify-center text-white text-sm font-semibold overflow-hidden shrink-0 ${onAvatarClick ? "cursor-pointer hover:opacity-80 transition-opacity" : ""}`}
@@ -273,9 +319,17 @@ export default function PostContent({
               {localFavorited ? <HiStar size={16} /> : <HiOutlineStar size={16} />}
               {localFavoriteCount > 0 && <span>{localFavoriteCount}</span>}
             </button>
-            <button className="flex items-center gap-1 text-xs text-gray-400 hover:text-green-500 transition-colors">
-              <HiOutlineLightningBolt size={16} />
-              {viralCount > 0 && <span>{viralCount}</span>}
+            <button
+              onClick={onViralToggle ? handleViralClick : undefined}
+              disabled={viraling}
+              className={`flex items-center gap-1 text-xs transition-colors disabled:opacity-50 ${
+                localViraled
+                  ? "text-green-500"
+                  : "text-gray-400 hover:text-green-500"
+              } ${onViralToggle ? "cursor-pointer" : "cursor-default"}`}
+            >
+              {localViraled ? <HiLightningBolt size={16} /> : <HiOutlineLightningBolt size={16} />}
+              {localViralCount > 0 && <span>{localViralCount}</span>}
             </button>
 
           </div>

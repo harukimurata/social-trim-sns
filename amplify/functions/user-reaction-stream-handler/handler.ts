@@ -39,19 +39,21 @@ export const handler: DynamoDBStreamHandler = async (event) => {
       const postId = image?.postId?.S;
       const type = image?.type?.S;
 
-      // FAVORITE タイプのみ処理する
-      if (!senderId || !postId || type !== "FAVORITE") return;
+      const isFavorite = type === "FAVORITE";
+      const isViral = type === "VIRAL";
+      if (!senderId || !postId || (!isFavorite && !isViral)) return;
 
+      const countField = isFavorite ? "favoriteCount" : "viralCount";
       const delta = isInsert ? 1 : -1;
 
-      // Post.favoriteCount をアトミックに更新する
+      // Post.favoriteCount / viralCount をアトミックに更新する
       // REMOVE 時は 0 を下回らないよう ConditionExpression でガードする
       try {
         await dynamo.send(
           new UpdateCommand({
             TableName: postTableName!,
             Key: { id: postId },
-            UpdateExpression: "ADD favoriteCount :delta",
+            UpdateExpression: `ADD ${countField} :delta`,
             ExpressionAttributeValues: {
               ":delta": delta,
               ...(isRemove ? { ":zero": 0 } : {}),
@@ -59,14 +61,14 @@ export const handler: DynamoDBStreamHandler = async (event) => {
             ...(isRemove
               ? {
                   ConditionExpression:
-                    "attribute_not_exists(favoriteCount) OR favoriteCount > :zero",
+                    `attribute_not_exists(${countField}) OR ${countField} > :zero`,
                 }
               : {}),
           })
         );
       } catch (err: any) {
         if (err.name === "ConditionalCheckFailedException") {
-          console.warn("favoriteCount already 0, skip decrement", { senderId, postId });
+          console.warn(`${countField} already 0, skip decrement`, { senderId, postId });
           return;
         }
         throw err;
@@ -75,7 +77,7 @@ export const handler: DynamoDBStreamHandler = async (event) => {
       // INSERT 時のみ通知を作成する
       if (!isInsert) return;
 
-      // 投稿オーナーを取得する（自分の投稿への自分のお気に入りは通知しない）
+      // 投稿オーナーを取得する（自分の投稿への自分のリアクションは通知しない）
       const postRes = await dynamo.send(
         new GetCommand({
           TableName: postTableName!,
@@ -94,7 +96,7 @@ export const handler: DynamoDBStreamHandler = async (event) => {
             id: randomUUID(),
             recipientId,
             senderId,
-            type: "FAVORITE",
+            type: isFavorite ? "FAVORITE" : "VIRAL",
             postId,
             isRead: false,
             createdAt: now,

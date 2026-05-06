@@ -24,16 +24,14 @@ type TimelinePost = {
   ttl?: number | null;
   isProtected: boolean;
   createdAt: string;
+  timelineAt: string;
   username: string;
   userInitial: string;
   avatarUrl?: string;
+  viralByUsername?: string;
+  viralByUserId?: string;
 };
 
-/**
- * S3パスを署名付きURLに変換する
- * @param path S3オブジェクトパス
- * @returns 署名付きURL文字列（失敗時は空文字）
- */
 async function resolveS3Url(path: string): Promise<string> {
   try {
     const { url } = await getUrl({ path });
@@ -43,11 +41,6 @@ async function resolveS3Url(path: string): Promise<string> {
   }
 }
 
-/**
- * ISO日時文字列を相対表示に変換する
- * @param isoString ISO 8601形式の日時文字列
- * @returns "N分前" / "N時間前" / "N日前" / "YYYY/MM/DD"
- */
 function formatRelativeDate(isoString: string): string {
   const date = new Date(isoString);
   const diffMs = Date.now() - date.getTime();
@@ -65,10 +58,6 @@ function formatRelativeDate(isoString: string): string {
   });
 }
 
-/**
- * UnixタイムスタンプをYYYY/MM/DD HH:MM形式に変換する
- * @param unix Unix timestamp（秒）
- */
 function formatUnixTimestamp(unix: number): string {
   return new Date(unix * 1000).toLocaleString("ja-JP", {
     year: "numeric",
@@ -87,11 +76,8 @@ export default function App() {
   const [error, setError] = useState("");
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [favoritedPostIds, setFavoritedPostIds] = useState<Set<string>>(new Set());
+  const [viraledPostIds, setViraledPostIds] = useState<Set<string>>(new Set());
 
-  /**
-   * タイムラインを取得する（自分 + フォロー中ユーザーの投稿を新着順で返す）
-   * @param isInitial 初回ロード時はtrue（ローディング表示を切り替える）
-   */
   const fetchTimeline = useCallback(async (isInitial = false) => {
     if (isInitial) setLoading(true);
     setFetching(true);
@@ -100,14 +86,13 @@ export default function App() {
       const { userId } = await getCurrentUser();
       setCurrentUserId(userId);
 
-      // フォロー中のユーザーIDを取得
       const { data: follows } = await client.models.Follow.list({
         filter: { followerId: { eq: userId } },
       });
       const followeeIds = (follows ?? []).map((f) => f.followeeId);
       const targetUserIds = [userId, ...followeeIds];
 
-      // 各ユーザーの投稿を並列フェッチして結合・新着順にソート
+      // 自分＋フォロイーの投稿を並列フェッチ
       const postsPerUser = await Promise.all(
         targetUserIds.map(async (uid) => {
           const { data } = await client.models.Post.listPostByUserId({ userId: uid });
@@ -119,7 +104,7 @@ export default function App() {
           new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime()
       );
 
-      // ユーザー情報を重複なしで並列フェッチ
+      // 投稿者情報を重複なしで並列フェッチ
       const uniqueUserIds = [...new Set(rawPosts.map((p) => p.userId))];
       const userMap = new Map<string, { username: string; avatarUrl: string }>();
       await Promise.all(
@@ -132,12 +117,16 @@ export default function App() {
         })
       );
 
-      // 自分のお気に入りリアクションを取得してSetを構築する
+      // 自分のリアクションを取得
       const { data: reactions } = await client.models.UserReaction.listUserReactionByUserId({ userId });
       const favIds = new Set(
         (reactions ?? []).filter((r) => r.type === "FAVORITE").map((r) => r.postId)
       );
+      const viralIds = new Set(
+        (reactions ?? []).filter((r) => r.type === "VIRAL").map((r) => r.postId)
+      );
       setFavoritedPostIds(favIds);
+      setViraledPostIds(viralIds);
 
       // コメント数・画像URLを並列解決
       const [commentCounts, resolvedImages] = await Promise.all([
@@ -157,7 +146,7 @@ export default function App() {
         ),
       ]);
 
-      const timeline: TimelinePost[] = rawPosts.map((post, i) => {
+      const regularPosts: TimelinePost[] = rawPosts.map((post, i) => {
         const user = userMap.get(post.userId);
         const username = user?.username ?? "Unknown";
         return {
@@ -174,13 +163,88 @@ export default function App() {
           ttl: post.ttl,
           isProtected: post.isProtected ?? false,
           createdAt: post.createdAt ?? "",
+          timelineAt: post.createdAt ?? "",
           username,
           userInitial: username[0]?.toUpperCase() ?? "?",
           avatarUrl: user?.avatarUrl || undefined,
         };
       });
 
-      setPosts(timeline);
+      // フォロイー（＋自分）のバイラル投稿をタイムラインに追加
+      const viralEntries: TimelinePost[] = [];
+      await Promise.all(
+        targetUserIds.map(async (followeeId) => {
+          const { data: followeeReactions } = await client.models.UserReaction.listUserReactionByUserId({
+            userId: followeeId,
+          });
+          const viralReactions = (followeeReactions ?? []).filter((r) => r.type === "VIRAL");
+          if (viralReactions.length === 0) return;
+
+          let viralByUser = userMap.get(followeeId);
+          if (!viralByUser) {
+            const { data: u } = await client.models.User.get({ userId: followeeId });
+            if (u) {
+              const avatarUrl = u.avatarUrl ? await resolveS3Url(u.avatarUrl) : "";
+              viralByUser = { username: u.username, avatarUrl };
+              userMap.set(followeeId, viralByUser);
+            }
+          }
+
+          await Promise.all(
+            viralReactions.map(async (reaction) => {
+              const { data: post } = await client.models.Post.get({ id: reaction.postId });
+              if (!post) return;
+
+              let postUser = userMap.get(post.userId);
+              if (!postUser) {
+                const { data: u } = await client.models.User.get({ userId: post.userId });
+                if (u) {
+                  const avatarUrl = u.avatarUrl ? await resolveS3Url(u.avatarUrl) : "";
+                  postUser = { username: u.username, avatarUrl };
+                  userMap.set(post.userId, postUser);
+                }
+              }
+
+              const imagePaths = post.imageUrls?.filter((p): p is string => !!p) ?? [];
+              const imageUrls = await Promise.all(imagePaths.map(resolveS3Url));
+
+              const { data: comments } = await client.models.Comment.listCommentByPostIdAndPostedAt({
+                postId: post.id,
+              });
+
+              const username = postUser?.username ?? "Unknown";
+              viralEntries.push({
+                id: post.id,
+                userId: post.userId,
+                content: post.content,
+                originalContent: post.originalContent,
+                isEdited: post.isEdited ?? false,
+                imageUrls: imageUrls.filter(Boolean),
+                hashtags: post.hashtags?.filter((h): h is string => !!h) ?? [],
+                favoriteCount: post.favoriteCount ?? 0,
+                viralCount: post.viralCount ?? 0,
+                commentCount: comments?.length ?? 0,
+                ttl: post.ttl,
+                isProtected: post.isProtected ?? false,
+                createdAt: post.createdAt ?? "",
+                timelineAt: reaction.createdAt ?? post.createdAt ?? "",
+                username,
+                userInitial: username[0]?.toUpperCase() ?? "?",
+                avatarUrl: postUser?.avatarUrl || undefined,
+                viralByUsername: viralByUser?.username,
+                viralByUserId: followeeId,
+              });
+            })
+          );
+        })
+      );
+
+      // 通常投稿とバイラルエントリを timelineAt で降順マージ
+      const merged = [...regularPosts, ...viralEntries].sort(
+        (a, b) => new Date(b.timelineAt).getTime() - new Date(a.timelineAt).getTime()
+      );
+
+      setPosts(merged);
     } catch (e) {
       console.error(e);
       setError("タイムラインの読み込みに失敗しました");
@@ -205,9 +269,19 @@ export default function App() {
     }
   }, [currentUserId]);
 
+  const handleViralToggle = useCallback(async (postId: string, currentlyViraled: boolean) => {
+    if (!currentUserId) return;
+    if (currentlyViraled) {
+      await client.models.UserReaction.delete({ userId: currentUserId, postId });
+      setViraledPostIds((prev) => { const next = new Set(prev); next.delete(postId); return next; });
+    } else {
+      await client.models.UserReaction.create({ userId: currentUserId, postId, type: "VIRAL" });
+      setViraledPostIds((prev) => new Set(prev).add(postId));
+    }
+  }, [currentUserId]);
+
   return (
     <main className="w-full max-w-[600px]">
-      {/* 任意のタイミングでリストを更新するフェッチボタン */}
       <div className="sticky top-14 z-10 bg-white/90 backdrop-blur-sm py-2 border-b border-gray-100 -mt-4 flex justify-center">
         <button
           onClick={() => fetchTimeline()}
@@ -230,7 +304,7 @@ export default function App() {
         <div>
           {posts.map((post) => (
             <PostContent
-              key={post.id}
+              key={`${post.id}${post.viralByUserId ? `_v_${post.viralByUserId}` : ""}`}
               postId={post.id}
               userId={post.userId}
               content={post.content}
@@ -254,9 +328,12 @@ export default function App() {
               }
               isProtected={post.isProtected}
               isFavorited={favoritedPostIds.has(post.id)}
+              isViraled={viraledPostIds.has(post.id)}
+              viralByUsername={post.viralByUsername}
               onPostClick={() => router.push(`/post/${post.id}`)}
               onAvatarClick={() => router.push(`/profile/${post.userId}`)}
               onFavoriteToggle={handleFavoriteToggle}
+              onViralToggle={handleViralToggle}
             />
           ))}
         </div>
