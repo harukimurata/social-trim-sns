@@ -3,6 +3,7 @@ import { auth } from "./auth/resource.js";
 import { data } from "./data/resource.js";
 import { postConfirmation } from "./auth/post-confirmation/resource.js";
 import { postStreamHandler } from "./functions/post-stream-handler/resource.js";
+import { followStreamHandler } from "./functions/follow-stream-handler/resource.js";
 import { storage } from "./storage/resource.js";
 import { Stack, CfnResource } from "aws-cdk-lib";
 import { Function as LambdaFunction, CfnEventSourceMapping } from "aws-cdk-lib/aws-lambda";
@@ -15,6 +16,7 @@ const backend = defineBackend({
   data,
   postConfirmation,
   postStreamHandler,
+  followStreamHandler,
   storage,
 });
 
@@ -120,3 +122,47 @@ streamLambda.addToRolePolicy(
 );
 
 streamLambda.addEnvironment("USER_TABLE_SSM_PATH", USER_TABLE_SSM);
+
+// ── follow-stream-handler Lambda ──────────────────────────────────────────
+const followStreamLambda = backend.followStreamHandler.resources.lambda as LambdaFunction;
+
+const followTableWrapper = amplifyDynamoDbTables["Follow"];
+followTableWrapper.streamSpecification = { streamViewType: StreamViewType.NEW_AND_OLD_IMAGES };
+const followCfnResource = (followTableWrapper as any).resource as CfnResource;
+
+new CfnEventSourceMapping(Stack.of(followCfnResource), "FollowStreamToLambda", {
+  functionName: followStreamLambda.functionArn,
+  eventSourceArn: followCfnResource.getAtt("TableStreamArn").toString(),
+  startingPosition: "LATEST",
+  filterCriteria: {
+    filters: [{ pattern: JSON.stringify({ eventName: ["INSERT", "REMOVE"] }) }],
+  },
+});
+
+followStreamLambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: [
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:DescribeStream",
+      "dynamodb:ListStreams",
+    ],
+    resources: ["arn:aws:dynamodb:*:*:table/Follow-*/stream/*"],
+  })
+);
+
+followStreamLambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ["dynamodb:UpdateItem"],
+    resources: ["arn:aws:dynamodb:*:*:table/User-*"],
+  })
+);
+
+followStreamLambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ["ssm:GetParameter"],
+    resources: ["arn:aws:ssm:*:*:parameter/social-trim-sns/*"],
+  })
+);
+
+followStreamLambda.addEnvironment("USER_TABLE_SSM_PATH", USER_TABLE_SSM);

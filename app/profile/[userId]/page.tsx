@@ -98,7 +98,6 @@ export default function UserProfilePage() {
 
   // フォロー関連
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [currentUserFollowingCount, setCurrentUserFollowingCount] = useState(0);
   const [isFollowing, setIsFollowing] = useState(false);
   const [followLoading, setFollowLoading] = useState(false);
   const [followError, setFollowError] = useState("");
@@ -112,14 +111,12 @@ export default function UserProfilePage() {
       try {
         // 現在のログインユーザー情報とプロフィールユーザー情報・投稿を並列フェッチ
         const currentUser = await getCurrentUser();
-        const [userData, postsData, currentUserData] = await Promise.all([
+        const [userData, postsData] = await Promise.all([
           client.models.User.get({ userId }),
           client.models.Post.listPostByUserId({ userId }),
-          client.models.User.get({ userId: currentUser.userId }),
         ]);
 
         setCurrentUserId(currentUser.userId);
-        setCurrentUserFollowingCount(currentUserData.data?.followingCount ?? 0);
 
         const user = userData.data;
         if (!user) {
@@ -190,10 +187,6 @@ export default function UserProfilePage() {
     fetchProfile();
   }, [userId]);
 
-  /**
-   * フォロー／解除を切り替える。
-   * followerCount はクライアント側で楽観的更新のみ（DB 側の更新は Lambda が担う想定）。
-   */
   async function handleFollowToggle() {
     if (!currentUserId || !profile || currentUserId === profile.userId) return;
     setFollowLoading(true);
@@ -204,11 +197,8 @@ export default function UserProfilePage() {
           followerId: currentUserId,
           followeeId: profile.userId,
         });
-        await client.models.User.update({
-          userId: currentUserId,
-          followingCount: Math.max(0, currentUserFollowingCount - 1),
-        });
-        setCurrentUserFollowingCount((prev) => Math.max(0, prev - 1));
+        // followerCount の DB 更新は DynamoDB Streams → Lambda が
+        // TransactWriteItems でアトミックに処理するため、ここでは楽観的UI更新のみ行う
         setProfile((prev) =>
           prev ? { ...prev, followerCount: Math.max(0, (prev.followerCount ?? 1) - 1) } : prev
         );
@@ -218,11 +208,8 @@ export default function UserProfilePage() {
           followerId: currentUserId,
           followeeId: profile.userId,
         });
-        await client.models.User.update({
-          userId: currentUserId,
-          followingCount: currentUserFollowingCount + 1,
-        });
-        setCurrentUserFollowingCount((prev) => prev + 1);
+        // followerCount の DB 更新は DynamoDB Streams → Lambda が
+        // TransactWriteItems でアトミックに処理するため、ここでは楽観的UI更新のみ行う
         setProfile((prev) =>
           prev ? { ...prev, followerCount: (prev.followerCount ?? 0) + 1 } : prev
         );
