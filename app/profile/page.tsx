@@ -10,9 +10,10 @@ import { useSetAtom } from "jotai";
 import { avatarAtom } from "@/lib/atoms/avatarAtom";
 import { useRouter } from "next/navigation";
 import PostContent from "@/app/components/PostContent";
+import CommentModal from "@/app/components/CommentModal";
 import { HiPencil, HiCamera, HiX, HiLockClosed, HiLockOpen, HiOutlineLightningBolt, HiLightningBolt } from "react-icons/hi";
 import { HiOutlineStar, HiStar } from "react-icons/hi2";
-import { FaRegComment } from "react-icons/fa";
+import { FaRegComment, FaComment } from "react-icons/fa";
 
 const client = generateClient<Schema>();
 
@@ -39,6 +40,7 @@ type ProfilePost = {
   hashtags: string[];
   favoriteCount: number;
   viralCount: number;
+  commentCount: number;
   ttl?: number | null;
   isProtected: boolean;
   createdAt: string;
@@ -54,6 +56,7 @@ type FavoritePost = {
   hashtags: string[];
   favoriteCount: number;
   viralCount: number;
+  commentCount: number;
   ttl?: number | null;
   isProtected: boolean;
   createdAt: string;
@@ -136,6 +139,11 @@ export default function ProfilePage() {
   const [viralsLoaded, setViralsLoaded] = useState(false);
   const [viraledIds, setViraledIds] = useState<Set<string>>(new Set());
 
+  // コメント状態
+  const [commentedPostIds, setCommentedPostIds] = useState<Set<string>>(new Set());
+  const [commentModalOpen, setCommentModalOpen] = useState(false);
+  const [commentTargetPostId, setCommentTargetPostId] = useState<string | null>(null);
+
   // マウント時にプロフィールと投稿を並列取得する
   useEffect(() => {
     async function fetchAll() {
@@ -181,6 +189,7 @@ export default function ProfilePage() {
             hashtags: p.hashtags?.filter((h): h is string => !!h) ?? [],
             favoriteCount: p.favoriteCount ?? 0,
             viralCount: p.viralCount ?? 0,
+            commentCount: p.commentCount ?? 0,
             ttl: p.ttl,
             isProtected: p.isProtected ?? false,
             createdAt: p.createdAt ?? "",
@@ -494,6 +503,7 @@ export default function ProfilePage() {
               hashtags: post.hashtags?.filter((h): h is string => !!h) ?? [],
               favoriteCount: post.favoriteCount ?? 0,
               viralCount: post.viralCount ?? 0,
+              commentCount: post.commentCount ?? 0,
               ttl: post.ttl,
               isProtected: post.isProtected ?? false,
               createdAt: post.createdAt ?? "",
@@ -566,6 +576,7 @@ export default function ProfilePage() {
               hashtags: post.hashtags?.filter((h): h is string => !!h) ?? [],
               favoriteCount: post.favoriteCount ?? 0,
               viralCount: post.viralCount ?? 0,
+              commentCount: post.commentCount ?? 0,
               ttl: post.ttl,
               isProtected: post.isProtected ?? false,
               createdAt: post.createdAt ?? "",
@@ -622,6 +633,19 @@ export default function ProfilePage() {
       )
     );
   }, [profile]);
+
+  const handleCommentSuccess = useCallback((postId: string) => {
+    setCommentedPostIds((prev) => new Set(prev).add(postId));
+    setPosts((prev) =>
+      prev.map((p) => p.id === postId ? { ...p, commentCount: p.commentCount + 1 } : p)
+    );
+    setFavoritePosts((prev) =>
+      prev.map((p) => p.id === postId ? { ...p, commentCount: p.commentCount + 1 } : p)
+    );
+    setViralPosts((prev) =>
+      prev.map((p) => p.id === postId ? { ...p, commentCount: p.commentCount + 1 } : p)
+    );
+  }, []);
 
   useEffect(() => {
     if (activeTab === "favorites" && !favoritesLoaded && profile) {
@@ -734,7 +758,7 @@ export default function ProfilePage() {
             )}
             <p className="text-lg font-bold text-gray-500">{profile.username}</p>
             {profile.bio && (
-              <div className="text-sm text-gray-500 mt-0.5 whitespace-pre-wrap">
+              <div className="text-sm text-gray-500 break-words leading-relaxed mt-0.5">
                 <MarkdownContent>{profile.bio}</MarkdownContent>
               </div>
             )}
@@ -987,24 +1011,29 @@ export default function ProfilePage() {
                       ) : (
                         /* 閲覧 + 管理ボタン */
                         <div>
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="text-xs text-gray-400">
-                              {post.createdAt ? formatRelativeDate(post.createdAt) : ""}
-                            </span>
-                            {post.isEdited && (
-                              <span className="flex items-center gap-0.5 text-xs text-gray-400">
-                                <HiPencil size={11} />
-                                編集済み
+                          <div
+                            className="cursor-pointer"
+                            onClick={() => router.push(`/post/${post.id}`)}
+                          >
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="text-xs text-gray-400">
+                                {post.createdAt ? formatRelativeDate(post.createdAt) : ""}
                               </span>
-                            )}
-                          </div>
+                              {post.isEdited && (
+                                <span className="flex items-center gap-0.5 text-xs text-gray-400">
+                                  <HiPencil size={11} />
+                                  編集済み
+                                </span>
+                              )}
+                            </div>
 
-                          <div className="text-sm text-gray-800 whitespace-pre-wrap break-words leading-relaxed">
-                            <MarkdownContent>
-                              {showOriginalMap[post.id] && post.originalContent
-                                ? post.originalContent
-                                : post.content}
-                            </MarkdownContent>
+                            <div className="text-sm text-gray-800 break-words leading-relaxed">
+                              <MarkdownContent>
+                                {showOriginalMap[post.id] && post.originalContent
+                                  ? post.originalContent
+                                  : post.content}
+                              </MarkdownContent>
+                            </div>
                           </div>
 
                           {post.isEdited && post.originalContent && (
@@ -1036,9 +1065,13 @@ export default function ProfilePage() {
                           )}
 
                           <div className="mt-3 flex gap-5">
-                            <span className="flex items-center gap-1 text-xs text-gray-400">
-                              <FaRegComment size={14} />
-                            </span>
+                            <button
+                              onClick={() => { setCommentTargetPostId(post.id); setCommentModalOpen(true); }}
+                              className={`flex items-center gap-1 text-xs transition-colors ${commentedPostIds.has(post.id) ? "text-brand" : "text-gray-400 hover:text-brand"}`}
+                            >
+                              {commentedPostIds.has(post.id) ? <FaComment size={14} /> : <FaRegComment size={14} />}
+                              {post.commentCount > 0 && <span>{post.commentCount}</span>}
+                            </button>
                             <button
                               onClick={() => handleFavoriteToggle(post.id, favoritedIds.has(post.id))}
                               className={`flex items-center gap-1 text-xs transition-colors ${favoritedIds.has(post.id)
@@ -1139,11 +1172,14 @@ export default function ProfilePage() {
                       createdAt={post.createdAt ? formatRelativeDate(post.createdAt) : undefined}
                       favoriteCount={post.favoriteCount}
                       viralCount={post.viralCount}
+                      commentCount={post.commentCount}
                       isFavorited={favoritedIds.has(post.id)}
                       isViraled={viraledIds.has(post.id)}
+                      isCommented={commentedPostIds.has(post.id)}
                       onFavoriteToggle={handleFavoriteToggle}
                       onViralToggle={handleViralToggle}
                       onPostClick={() => router.push(`/post/${post.id}`)}
+                      onCommentClick={() => { setCommentTargetPostId(post.id); setCommentModalOpen(true); }}
                       onAvatarClick={() => router.push(`/profile/${post.userId}`)}
                     />
                   ))}
@@ -1177,12 +1213,15 @@ export default function ProfilePage() {
                       createdAt={post.createdAt ? formatRelativeDate(post.createdAt) : undefined}
                       favoriteCount={post.favoriteCount}
                       viralCount={post.viralCount}
+                      commentCount={post.commentCount}
                       isFavorited={favoritedIds.has(post.id)}
                       isViraled={viraledIds.has(post.id)}
+                      isCommented={commentedPostIds.has(post.id)}
                       viralByUsername={profile.username}
                       onFavoriteToggle={handleFavoriteToggle}
                       onViralToggle={handleViralToggle}
                       onPostClick={() => router.push(`/post/${post.id}`)}
+                      onCommentClick={() => { setCommentTargetPostId(post.id); setCommentModalOpen(true); }}
                       onAvatarClick={() => router.push(`/profile/${post.userId}`)}
                     />
                   ))}
@@ -1192,6 +1231,13 @@ export default function ProfilePage() {
           )}
         </section>
       )}
+
+      <CommentModal
+        isOpen={commentModalOpen}
+        onClose={() => setCommentModalOpen(false)}
+        postId={commentTargetPostId ?? ""}
+        onSuccess={() => commentTargetPostId && handleCommentSuccess(commentTargetPostId)}
+      />
     </main>
   );
 }

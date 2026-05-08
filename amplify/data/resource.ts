@@ -46,6 +46,7 @@ const schema = a.schema({
       hashtags: a.string().array(),
       favoriteCount: a.integer().default(0),
       viralCount: a.integer().default(0),
+      commentCount: a.integer().default(0),
       // Unix timestamp (updatedAt + 7日)。isProtected=true の場合は null
       ttl: a.integer(),
       isProtected: a.boolean().default(false),
@@ -143,6 +144,20 @@ const schema = a.schema({
       allow.authenticated().to(["read"]),
     ]),
 
+  // コメントリアクション (Favorite / Viral)
+  CommentReaction: a
+    .model({
+      userId: a.string().required(),
+      commentId: a.string().required(),
+      type: a.ref("ReactionType").required(),
+    })
+    .identifier(["userId", "commentId"])
+    .secondaryIndexes((index) => [index("userId")])
+    .authorization((allow) => [
+      allow.ownerDefinedIn("userId"),
+      allow.authenticated().to(["read"]),
+    ]),
+
   // お気に入り通知 (UserReaction INSERT 時に Lambda が作成)
   Notification: a
     .model({
@@ -150,6 +165,7 @@ const schema = a.schema({
       senderId: a.string().required(),
       type: a.string().required(),
       postId: a.string().required(),
+      commentId: a.string(),
       isRead: a.boolean().default(false),
     })
     .secondaryIndexes((index) => [index("recipientId")])

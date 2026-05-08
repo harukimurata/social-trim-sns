@@ -10,7 +10,7 @@ import {
   HiChevronRight,
 } from "react-icons/hi2";
 import { HiOutlineLightningBolt, HiLightningBolt, HiPencil } from "react-icons/hi";
-import { FaRegComment } from "react-icons/fa";
+import { FaRegComment, FaComment } from "react-icons/fa";
 import { IoClose } from "react-icons/io5";
 
 export type PostData = {
@@ -33,9 +33,11 @@ export type PostData = {
   isProtected?: boolean;
   isFavorited?: boolean;
   isViraled?: boolean;
+  isCommented?: boolean;
   /** タイムラインでバイラルした人の名前を表示する場合にセット */
   viralByUsername?: string;
   onPostClick?: () => void;
+  onCommentClick?: () => void;
   onAvatarClick?: () => void;
   onFavoriteToggle?: (postId: string, currentlyFavorited: boolean) => Promise<void>;
   onViralToggle?: (postId: string, currentlyViraled: boolean) => Promise<void>;
@@ -58,8 +60,10 @@ export default function PostContent({
   deletionScheduledAt,
   isFavorited = false,
   isViraled = false,
+  isCommented = false,
   viralByUsername,
   onPostClick,
+  onCommentClick,
   onAvatarClick,
   onFavoriteToggle,
   onViralToggle,
@@ -303,8 +307,11 @@ export default function PostContent({
 
           {/* アクションボタン */}
           <div className="mt-3 flex gap-5" onClick={(e) => e.stopPropagation()}>
-            <button className="flex items-center gap-1 text-xs text-gray-400 hover:text-brand transition-colors">
-              <FaRegComment size={14} />
+            <button
+              onClick={onCommentClick}
+              className={`flex items-center gap-1 text-xs transition-colors ${isCommented ? "text-brand" : "text-gray-400 hover:text-brand"} ${onCommentClick ? "cursor-pointer" : "cursor-default"}`}
+            >
+              {isCommented ? <FaComment size={14} /> : <FaRegComment size={14} />}
               {commentCount > 0 && <span>{commentCount}</span>}
             </button>
             <button

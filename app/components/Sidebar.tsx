@@ -8,8 +8,9 @@ import { FaRegUser, FaSearch } from "react-icons/fa";
 import { HiHome } from "react-icons/hi";
 import { CiBoxList } from "react-icons/ci";
 import { SiBuzzfeed } from "react-icons/si";
-import { IoMdNotifications } from "react-icons/io";
+import { IoMdNotifications, IoIosHelpCircleOutline } from "react-icons/io";
 import { PiSignOut } from "react-icons/pi";
+import { TbNotes } from "react-icons/tb";
 import styles from "./Sidebar.module.css";
 
 const iconClass = "shrink-0 w-5 h-5 transition duration-75 group-hover:text-fg-brand";
@@ -46,9 +47,15 @@ const navItems = [
     hideOnTablet: true,
   },
   {
-    href: "/list",
-    label: "リスト",
-    icon: <CiBoxList className={iconClass} aria-hidden="true" />,
+    href: "/cheat_sheet",
+    label: "チートシート",
+    icon: <TbNotes className={iconClass} aria-hidden="true" />,
+    hideOnTablet: false,
+  },
+  {
+    href: "/help",
+    label: "ヘルプ",
+    icon: <IoIosHelpCircleOutline className={iconClass} aria-hidden="true" />,
     hideOnTablet: false,
   },
 
