@@ -5,6 +5,8 @@ import { postConfirmation } from "./auth/post-confirmation/resource.js";
 import { postStreamHandler } from "./functions/post-stream-handler/resource.js";
 import { followStreamHandler } from "./functions/follow-stream-handler/resource.js";
 import { userReactionStreamHandler } from "./functions/user-reaction-stream-handler/resource.js";
+import { commentStreamHandler } from "./functions/comment-stream-handler/resource.js";
+import { commentReactionStreamHandler } from "./functions/comment-reaction-stream-handler/resource.js";
 import { storage } from "./storage/resource.js";
 import { Stack, CfnResource } from "aws-cdk-lib";
 import { Function as LambdaFunction, CfnEventSourceMapping } from "aws-cdk-lib/aws-lambda";
@@ -19,6 +21,8 @@ const backend = defineBackend({
   postStreamHandler,
   followStreamHandler,
   userReactionStreamHandler,
+  commentStreamHandler,
+  commentReactionStreamHandler,
   storage,
 });
 
@@ -32,6 +36,7 @@ const dataStack = Stack.of(tables["Counter"]);
 const COUNTER_TABLE_SSM = "/social-trim-sns/counter-table-name";
 const USER_TABLE_SSM = "/social-trim-sns/user-table-name";
 const POST_TABLE_SSM = "/social-trim-sns/post-table-name";
+const COMMENT_TABLE_SSM = "/social-trim-sns/comment-table-name";
 const NOTIFICATION_TABLE_SSM = "/social-trim-sns/notification-table-name";
 
 new StringParameter(dataStack, "CounterTableNameSsm", {
@@ -47,6 +52,11 @@ new StringParameter(dataStack, "UserTableNameSsm", {
 new StringParameter(dataStack, "PostTableNameSsm", {
   parameterName: POST_TABLE_SSM,
   stringValue: tables["Post"].tableName,
+});
+
+new StringParameter(dataStack, "CommentTableNameSsm", {
+  parameterName: COMMENT_TABLE_SSM,
+  stringValue: tables["Comment"].tableName,
 });
 
 new StringParameter(dataStack, "NotificationTableNameSsm", {
@@ -232,3 +242,115 @@ userReactionStreamLambda.addToRolePolicy(
 
 userReactionStreamLambda.addEnvironment("POST_TABLE_SSM_PATH", POST_TABLE_SSM);
 userReactionStreamLambda.addEnvironment("NOTIFICATION_TABLE_SSM_PATH", NOTIFICATION_TABLE_SSM);
+
+// ── comment-stream-handler Lambda ─────────────────────────────────────────
+const commentStreamLambda = backend.commentStreamHandler.resources.lambda as LambdaFunction;
+
+const commentTableWrapper = amplifyDynamoDbTables["Comment"];
+commentTableWrapper.streamSpecification = { streamViewType: StreamViewType.NEW_AND_OLD_IMAGES };
+const commentCfnResource = (commentTableWrapper as any).resource as CfnResource;
+
+new CfnEventSourceMapping(Stack.of(commentCfnResource), "CommentStreamToLambda", {
+  functionName: commentStreamLambda.functionArn,
+  eventSourceArn: commentCfnResource.getAtt("TableStreamArn").toString(),
+  startingPosition: "LATEST",
+  filterCriteria: {
+    filters: [{ pattern: JSON.stringify({ eventName: ["INSERT", "REMOVE"] }) }],
+  },
+});
+
+commentStreamLambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: [
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:DescribeStream",
+      "dynamodb:ListStreams",
+    ],
+    resources: ["arn:aws:dynamodb:*:*:table/Comment-*/stream/*"],
+  })
+);
+
+commentStreamLambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ["dynamodb:GetItem", "dynamodb:UpdateItem"],
+    resources: ["arn:aws:dynamodb:*:*:table/Post-*"],
+  })
+);
+
+commentStreamLambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ["dynamodb:GetItem"],
+    resources: ["arn:aws:dynamodb:*:*:table/Comment-*"],
+  })
+);
+
+commentStreamLambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ["dynamodb:PutItem"],
+    resources: ["arn:aws:dynamodb:*:*:table/Notification-*"],
+  })
+);
+
+commentStreamLambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ["ssm:GetParameter"],
+    resources: ["arn:aws:ssm:*:*:parameter/social-trim-sns/*"],
+  })
+);
+
+commentStreamLambda.addEnvironment("POST_TABLE_SSM_PATH", POST_TABLE_SSM);
+commentStreamLambda.addEnvironment("COMMENT_TABLE_SSM_PATH", COMMENT_TABLE_SSM);
+commentStreamLambda.addEnvironment("NOTIFICATION_TABLE_SSM_PATH", NOTIFICATION_TABLE_SSM);
+
+// ── comment-reaction-stream-handler Lambda ────────────────────────────────
+const commentReactionStreamLambda = backend.commentReactionStreamHandler.resources.lambda as LambdaFunction;
+
+const commentReactionTableWrapper = amplifyDynamoDbTables["CommentReaction"];
+commentReactionTableWrapper.streamSpecification = { streamViewType: StreamViewType.NEW_AND_OLD_IMAGES };
+const commentReactionCfnResource = (commentReactionTableWrapper as any).resource as CfnResource;
+
+new CfnEventSourceMapping(Stack.of(commentReactionCfnResource), "CommentReactionStreamToLambda", {
+  functionName: commentReactionStreamLambda.functionArn,
+  eventSourceArn: commentReactionCfnResource.getAtt("TableStreamArn").toString(),
+  startingPosition: "LATEST",
+  filterCriteria: {
+    filters: [{ pattern: JSON.stringify({ eventName: ["INSERT", "REMOVE"] }) }],
+  },
+});
+
+commentReactionStreamLambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: [
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:DescribeStream",
+      "dynamodb:ListStreams",
+    ],
+    resources: ["arn:aws:dynamodb:*:*:table/CommentReaction-*/stream/*"],
+  })
+);
+
+commentReactionStreamLambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ["dynamodb:GetItem", "dynamodb:UpdateItem"],
+    resources: ["arn:aws:dynamodb:*:*:table/Comment-*"],
+  })
+);
+
+commentReactionStreamLambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ["dynamodb:PutItem"],
+    resources: ["arn:aws:dynamodb:*:*:table/Notification-*"],
+  })
+);
+
+commentReactionStreamLambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ["ssm:GetParameter"],
+    resources: ["arn:aws:ssm:*:*:parameter/social-trim-sns/*"],
+  })
+);
+
+commentReactionStreamLambda.addEnvironment("COMMENT_TABLE_SSM_PATH", COMMENT_TABLE_SSM);
+commentReactionStreamLambda.addEnvironment("NOTIFICATION_TABLE_SSM_PATH", NOTIFICATION_TABLE_SSM);

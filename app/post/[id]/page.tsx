@@ -1,12 +1,14 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { generateClient } from "aws-amplify/data";
 import { getCurrentUser } from "aws-amplify/auth";
 import { getUrl } from "aws-amplify/storage";
 import type { Schema } from "@/amplify/data/resource";
 import PostContent from "@/app/components/PostContent";
+import CommentContent from "@/app/components/CommentContent";
+import CommentModal from "@/app/components/CommentModal";
 import { HiArrowLeft } from "react-icons/hi";
 import { FaRegComment } from "react-icons/fa";
 
@@ -22,6 +24,7 @@ type PostDetail = {
   hashtags: string[];
   favoriteCount: number;
   viralCount: number;
+  commentCount: number;
   ttl?: number | null;
   isProtected: boolean;
   createdAt: string;
@@ -38,19 +41,17 @@ type CommentItem = {
   content: string;
   originalContent?: string | null;
   isEdited: boolean;
-  postedAt?: string | null;
   createdAt: string;
   username: string;
   userInitial: string;
   avatarUrl?: string;
-  replies: CommentItem[];
+  favoriteCount: number;
+  viralCount: number;
+  commentNumber: number;
+  isFavorited: boolean;
+  isViraled: boolean;
 };
 
-/**
- * S3パスを署名付きURLに変換する
- * @param path S3オブジェクトパス
- * @returns 署名付きURL文字列（失敗時は空文字）
- */
 async function resolveS3Url(path: string): Promise<string> {
   try {
     const { url } = await getUrl({ path });
@@ -60,10 +61,6 @@ async function resolveS3Url(path: string): Promise<string> {
   }
 }
 
-/**
- * ISO日時文字列を "YYYY/MM/DD HH:MM" 形式に変換する
- * @param isoString ISO 8601形式の日時文字列
- */
 function formatDate(isoString: string): string {
   return new Date(isoString).toLocaleString("ja-JP", {
     year: "numeric",
@@ -74,10 +71,6 @@ function formatDate(isoString: string): string {
   });
 }
 
-/**
- * UnixタイムスタンプをYYYY/MM/DD HH:MM形式に変換する
- * @param unix Unix timestamp（秒）
- */
 function formatUnixTimestamp(unix: number): string {
   return new Date(unix * 1000).toLocaleString("ja-JP", {
     year: "numeric",
@@ -98,135 +91,126 @@ export default function PostDetailPage() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [isFavorited, setIsFavorited] = useState(false);
   const [isViraled, setIsViraled] = useState(false);
+  const [replyTarget, setReplyTarget] = useState<{
+    parentCommentId: string | null;
+    replyToUsername?: string;
+    replyToContent?: string;
+    initialContent?: string;
+  } | null>(null);
+
+  const fetchPostAndComments = useCallback(async () => {
+    if (!id) return;
+    setLoading(true);
+    setError("");
+    try {
+      const [{ userId: loginUserId }, { data: rawPost }] = await Promise.all([
+        getCurrentUser(),
+        client.models.Post.get({ id }),
+      ]);
+      setCurrentUserId(loginUserId);
+
+      if (!rawPost) {
+        setError("投稿が見つかりません");
+        return;
+      }
+
+      const [userData, commentsData, reactionData, myCommentReactionsData] = await Promise.all([
+        client.models.User.get({ userId: rawPost.userId }),
+        client.models.Comment.list({ filter: { postId: { eq: rawPost.id } } }),
+        client.models.UserReaction.get({ userId: loginUserId, postId: rawPost.id }),
+        client.models.CommentReaction.listCommentReactionByUserId({ userId: loginUserId }),
+      ]);
+
+      setIsFavorited(!!reactionData.data && reactionData.data.type === "FAVORITE");
+      setIsViraled(!!reactionData.data && reactionData.data.type === "VIRAL");
+
+      const myCommentReactions = myCommentReactionsData.data ?? [];
+      const favoritedCommentIds = new Set(
+        myCommentReactions.filter((r) => r.type === "FAVORITE").map((r) => r.commentId)
+      );
+      const viraledCommentIds = new Set(
+        myCommentReactions.filter((r) => r.type === "VIRAL").map((r) => r.commentId)
+      );
+
+      const user = userData.data;
+      const avatarUrl = user?.avatarUrl ? await resolveS3Url(user.avatarUrl) : "";
+      const username = user?.username ?? "Unknown";
+
+      const imagePaths = rawPost.imageUrls?.filter((p): p is string => !!p) ?? [];
+      const resolvedImages = await Promise.all(imagePaths.map(resolveS3Url));
+
+      const rawComments = (commentsData.data ?? []).sort(
+        (a, b) =>
+          new Date(a.postedAt ?? a.createdAt ?? 0).getTime() -
+          new Date(b.postedAt ?? b.createdAt ?? 0).getTime()
+      );
+
+      const uniqueCommentUserIds = [...new Set(rawComments.map((c) => c.userId))];
+      const commentUserMap = new Map<string, { username: string; avatarUrl: string }>();
+      await Promise.all(
+        uniqueCommentUserIds.map(async (uid) => {
+          const { data } = await client.models.User.get({ userId: uid });
+          if (data) {
+            const url = data.avatarUrl ? await resolveS3Url(data.avatarUrl) : "";
+            commentUserMap.set(uid, { username: data.username, avatarUrl: url });
+          }
+        })
+      );
+
+      const allComments: CommentItem[] = rawComments.map((c, index) => {
+        const u = commentUserMap.get(c.userId);
+        const uname = u?.username ?? "Unknown";
+        return {
+          id: c.id,
+          postId: c.postId,
+          parentCommentId: c.parentCommentId,
+          userId: c.userId,
+          content: c.content,
+          originalContent: c.originalContent,
+          isEdited: c.isEdited ?? false,
+          createdAt: c.postedAt ?? c.createdAt ?? "",
+          username: uname,
+          userInitial: uname[0]?.toUpperCase() ?? "?",
+          avatarUrl: u?.avatarUrl || undefined,
+          favoriteCount: c.favoriteCount ?? 0,
+          viralCount: c.viralCount ?? 0,
+          commentNumber: index + 1,
+          isFavorited: favoritedCommentIds.has(c.id),
+          isViraled: viraledCommentIds.has(c.id),
+        };
+      });
+
+      setPost({
+        id: rawPost.id,
+        userId: rawPost.userId,
+        content: rawPost.content,
+        originalContent: rawPost.originalContent,
+        isEdited: rawPost.isEdited ?? false,
+        imageUrls: resolvedImages.filter(Boolean),
+        hashtags: rawPost.hashtags?.filter((h): h is string => !!h) ?? [],
+        favoriteCount: rawPost.favoriteCount ?? 0,
+        viralCount: rawPost.viralCount ?? 0,
+        commentCount: rawPost.commentCount ?? rawComments.length,
+        ttl: rawPost.ttl,
+        isProtected: rawPost.isProtected ?? false,
+        createdAt: rawPost.createdAt ?? "",
+        username,
+        userInitial: username[0]?.toUpperCase() ?? "?",
+        avatarUrl: avatarUrl || undefined,
+      });
+
+      setComments(allComments);
+    } catch (e) {
+      console.error(e);
+      setError("投稿の読み込みに失敗しました");
+    } finally {
+      setLoading(false);
+    }
+  }, [id]);
 
   useEffect(() => {
-    if (!id) return;
-
-    async function fetchPostAndComments() {
-      setLoading(true);
-      setError("");
-      try {
-        // 現在のログインユーザーと投稿を並列取得
-        const [{ userId: loginUserId }, { data: rawPost }] = await Promise.all([
-          getCurrentUser(),
-          client.models.Post.get({ id }),
-        ]);
-        setCurrentUserId(loginUserId);
-
-        if (!rawPost) {
-          setError("投稿が見つかりません");
-          return;
-        }
-
-        // 投稿者情報・コメント一覧・自分のリアクションを並列フェッチ
-        const [userData, commentsData, reactionData] = await Promise.all([
-          client.models.User.get({ userId: rawPost.userId }),
-          client.models.Comment.listCommentByPostIdAndPostedAt({ postId: rawPost.id }),
-          client.models.UserReaction.get({ userId: loginUserId, postId: rawPost.id }),
-        ]);
-        setIsFavorited(!!reactionData.data && reactionData.data.type === "FAVORITE");
-        setIsViraled(!!reactionData.data && reactionData.data.type === "VIRAL");
-
-        const user = userData.data;
-        const avatarUrl = user?.avatarUrl ? await resolveS3Url(user.avatarUrl) : "";
-        const username = user?.username ?? "Unknown";
-
-        // 画像URLを解決
-        const imagePaths = rawPost.imageUrls?.filter((p): p is string => !!p) ?? [];
-        const resolvedImages = await Promise.all(imagePaths.map(resolveS3Url));
-
-        setPost({
-          id: rawPost.id,
-          userId: rawPost.userId,
-          content: rawPost.content,
-          originalContent: rawPost.originalContent,
-          isEdited: rawPost.isEdited ?? false,
-          imageUrls: resolvedImages.filter(Boolean),
-          hashtags: rawPost.hashtags?.filter((h): h is string => !!h) ?? [],
-          favoriteCount: rawPost.favoriteCount ?? 0,
-          viralCount: rawPost.viralCount ?? 0,
-          ttl: rawPost.ttl,
-          isProtected: rawPost.isProtected ?? false,
-          createdAt: rawPost.createdAt ?? "",
-          username,
-          userInitial: username[0]?.toUpperCase() ?? "?",
-          avatarUrl: avatarUrl || undefined,
-        });
-
-        // コメントをトップレベルと返信に分類し、ユーザー情報を付加
-        const rawComments = commentsData.data ?? [];
-
-        const uniqueCommentUserIds = [...new Set(rawComments.map((c) => c.userId))];
-        const commentUserMap = new Map<string, { username: string; avatarUrl: string }>();
-        await Promise.all(
-          uniqueCommentUserIds.map(async (uid) => {
-            const { data } = await client.models.User.get({ userId: uid });
-            if (data) {
-              const url = data.avatarUrl ? await resolveS3Url(data.avatarUrl) : "";
-              commentUserMap.set(uid, { username: data.username, avatarUrl: url });
-            }
-          })
-        );
-
-        // 返信コメントをparentCommentIdでグルーピング
-        const replyMap = new Map<string, CommentItem[]>();
-        for (const c of rawComments) {
-          if (!c.parentCommentId) continue;
-          const commentUser = commentUserMap.get(c.userId);
-          const cUsername = commentUser?.username ?? "Unknown";
-          const item: CommentItem = {
-            id: c.id,
-            postId: c.postId,
-            parentCommentId: c.parentCommentId,
-            userId: c.userId,
-            content: c.content,
-            originalContent: c.originalContent,
-            isEdited: c.isEdited ?? false,
-            postedAt: c.postedAt,
-            createdAt: c.createdAt ?? "",
-            username: cUsername,
-            userInitial: cUsername[0]?.toUpperCase() ?? "?",
-            avatarUrl: commentUser?.avatarUrl || undefined,
-            replies: [],
-          };
-          const existing = replyMap.get(c.parentCommentId) ?? [];
-          replyMap.set(c.parentCommentId, [...existing, item]);
-        }
-
-        // トップレベルコメントに返信を付加
-        const topLevelComments: CommentItem[] = rawComments
-          .filter((c) => !c.parentCommentId)
-          .map((c) => {
-            const commentUser = commentUserMap.get(c.userId);
-            const cUsername = commentUser?.username ?? "Unknown";
-            return {
-              id: c.id,
-              postId: c.postId,
-              parentCommentId: null,
-              userId: c.userId,
-              content: c.content,
-              originalContent: c.originalContent,
-              isEdited: c.isEdited ?? false,
-              postedAt: c.postedAt,
-              createdAt: c.createdAt ?? "",
-              username: cUsername,
-              userInitial: cUsername[0]?.toUpperCase() ?? "?",
-              avatarUrl: commentUser?.avatarUrl || undefined,
-              replies: replyMap.get(c.id) ?? [],
-            };
-          });
-
-        setComments(topLevelComments);
-      } catch (e) {
-        console.error(e);
-        setError("投稿の読み込みに失敗しました");
-      } finally {
-        setLoading(false);
-      }
-    }
-
     fetchPostAndComments();
-  }, [id]);
+  }, [fetchPostAndComments]);
 
   async function handleFavoriteToggle(postId: string, currentlyFavorited: boolean) {
     if (!currentUserId) return;
@@ -247,6 +231,24 @@ export default function PostDetailPage() {
     } else {
       await client.models.UserReaction.create({ userId: currentUserId, postId, type: "VIRAL" });
       setIsViraled(true);
+    }
+  }
+
+  async function handleCommentFavoriteToggle(commentId: string, currentlyFavorited: boolean) {
+    if (!currentUserId) return;
+    if (currentlyFavorited) {
+      await client.models.CommentReaction.delete({ userId: currentUserId, commentId });
+    } else {
+      await client.models.CommentReaction.create({ userId: currentUserId, commentId, type: "FAVORITE" });
+    }
+  }
+
+  async function handleCommentViralToggle(commentId: string, currentlyViraled: boolean) {
+    if (!currentUserId) return;
+    if (currentlyViraled) {
+      await client.models.CommentReaction.delete({ userId: currentUserId, commentId });
+    } else {
+      await client.models.CommentReaction.create({ userId: currentUserId, commentId, type: "VIRAL" });
     }
   }
 
@@ -272,8 +274,6 @@ export default function PostDetailPage() {
       </main>
     );
   }
-
-  const totalCommentCount = comments.reduce((sum, c) => sum + 1 + c.replies.length, 0);
 
   return (
     <main>
@@ -303,7 +303,7 @@ export default function PostDetailPage() {
         createdAt={post.createdAt ? formatDate(post.createdAt) : undefined}
         favoriteCount={post.favoriteCount}
         viralCount={post.viralCount}
-        commentCount={totalCommentCount}
+        commentCount={post.commentCount}
         deletionScheduledAt={
           post.isProtected
             ? null
@@ -316,6 +316,7 @@ export default function PostDetailPage() {
         isViraled={isViraled}
         onFavoriteToggle={currentUserId ? handleFavoriteToggle : undefined}
         onViralToggle={currentUserId ? handleViralToggle : undefined}
+        onCommentClick={currentUserId ? () => setReplyTarget({ parentCommentId: null }) : undefined}
         onAvatarClick={() => router.push(`/profile/${post.userId}`)}
       />
 
@@ -323,7 +324,7 @@ export default function PostDetailPage() {
       <div className="px-4 py-3 border-b border-gray-100">
         <div className="flex items-center gap-2 text-sm font-semibold text-gray-700">
           <FaRegComment size={15} />
-          <span>コメント {totalCommentCount > 0 ? `(${totalCommentCount})` : ""}</span>
+          <span>コメント {comments.length > 0 ? `(${comments.length})` : ""}</span>
         </div>
       </div>
 
@@ -334,88 +335,56 @@ export default function PostDetailPage() {
       ) : (
         <div>
           {comments.map((comment) => (
-            <div key={comment.id}>
-              <CommentRow
-                comment={comment}
-                onAvatarClick={() => router.push(`/profile/${comment.userId}`)}
-              />
-              {comment.replies.map((reply) => (
-                <div key={reply.id} className="pl-12">
-                  <CommentRow
-                    comment={reply}
-                    onAvatarClick={() => router.push(`/profile/${reply.userId}`)}
-                  />
-                </div>
-              ))}
-            </div>
+            <CommentContent
+              key={comment.id}
+              commentId={comment.id}
+              commentNumber={comment.commentNumber}
+              postId={comment.postId}
+              parentCommentId={comment.parentCommentId}
+              userId={comment.userId}
+              content={comment.content}
+              originalContent={comment.originalContent}
+              isEdited={comment.isEdited}
+              username={comment.username}
+              userInitial={comment.userInitial}
+              avatarUrl={comment.avatarUrl}
+              createdAt={comment.createdAt ? formatDate(comment.createdAt) : undefined}
+              favoriteCount={comment.favoriteCount}
+              viralCount={comment.viralCount}
+              isFavorited={comment.isFavorited}
+              isViraled={comment.isViraled}
+              onReplyClick={
+                currentUserId
+                  ? () =>
+                      setReplyTarget({
+                        parentCommentId: comment.id,
+                        replyToUsername: comment.username,
+                        replyToContent: comment.content,
+                        initialContent: `#${comment.commentNumber} `,
+                      })
+                  : undefined
+              }
+              onAvatarClick={() => router.push(`/profile/${comment.userId}`)}
+              onFavoriteToggle={currentUserId ? handleCommentFavoriteToggle : undefined}
+              onViralToggle={currentUserId ? handleCommentViralToggle : undefined}
+            />
           ))}
         </div>
       )}
+
+      {/* コメント投稿モーダル */}
+      {currentUserId && (
+        <CommentModal
+          isOpen={replyTarget !== null}
+          onClose={() => setReplyTarget(null)}
+          postId={post.id}
+          parentCommentId={replyTarget?.parentCommentId}
+          replyToUsername={replyTarget?.replyToUsername}
+          replyToContent={replyTarget?.replyToContent}
+          initialContent={replyTarget?.initialContent}
+          onSuccess={fetchPostAndComments}
+        />
+      )}
     </main>
-  );
-}
-
-type CommentRowProps = {
-  comment: CommentItem;
-  onAvatarClick?: () => void;
-};
-
-/**
- * コメント1件を表示するコンポーネント
- */
-function CommentRow({ comment, onAvatarClick }: CommentRowProps) {
-  const [showOriginal, setShowOriginal] = useState(false);
-  const displayContent =
-    comment.isEdited && showOriginal && comment.originalContent
-      ? comment.originalContent
-      : comment.content;
-
-  const dateStr = comment.postedAt ?? comment.createdAt;
-  const formattedDate = dateStr ? formatDate(dateStr) : undefined;
-
-  return (
-    <div className="px-4 py-3 border-b border-gray-100">
-      <div className="flex gap-3">
-        {/* アバター */}
-        <div
-          className={`w-8 h-8 rounded-full bg-brand-500 flex items-center justify-center text-white text-xs font-semibold overflow-hidden shrink-0 ${onAvatarClick ? "cursor-pointer hover:opacity-80 transition-opacity" : ""}`}
-          onClick={onAvatarClick}
-        >
-          {comment.avatarUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={comment.avatarUrl}
-              alt={comment.username}
-              className="w-full h-full object-cover"
-            />
-          ) : (
-            comment.userInitial
-          )}
-        </div>
-
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1 flex-wrap">
-            <span className="font-semibold text-sm text-gray-900">{comment.username}</span>
-            {formattedDate && (
-              <span className="text-xs text-gray-400">{formattedDate}</span>
-            )}
-            {comment.isEdited && (
-              <span className="text-xs text-gray-400">編集済み</span>
-            )}
-          </div>
-          <p className="text-sm text-gray-800 whitespace-pre-wrap break-words leading-relaxed">
-            {displayContent}
-          </p>
-          {comment.isEdited && comment.originalContent && (
-            <button
-              onClick={() => setShowOriginal((v) => !v)}
-              className="mt-1 text-xs text-fg-brand hover:underline"
-            >
-              {showOriginal ? "編集後を表示" : "編集前を表示"}
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
   );
 }

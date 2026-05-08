@@ -7,6 +7,7 @@ import { getUrl } from "aws-amplify/storage";
 import { useRouter } from "next/navigation";
 import type { Schema } from "@/amplify/data/resource";
 import PostContent from "./components/PostContent";
+import CommentModal from "./components/CommentModal";
 
 const client = generateClient<Schema>();
 
@@ -77,6 +78,8 @@ export default function App() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [favoritedPostIds, setFavoritedPostIds] = useState<Set<string>>(new Set());
   const [viraledPostIds, setViraledPostIds] = useState<Set<string>>(new Set());
+  const [commentModalOpen, setCommentModalOpen] = useState(false);
+  const [commentTargetPostId, setCommentTargetPostId] = useState<string | null>(null);
 
   const fetchTimeline = useCallback(async (isInitial = false) => {
     if (isInitial) setLoading(true);
@@ -132,8 +135,8 @@ export default function App() {
       const [commentCounts, resolvedImages] = await Promise.all([
         Promise.all(
           rawPosts.map(async (post) => {
-            const { data } = await client.models.Comment.listCommentByPostIdAndPostedAt({
-              postId: post.id,
+            const { data } = await client.models.Comment.list({
+              filter: { postId: { eq: post.id } },
             });
             return data?.length ?? 0;
           })
@@ -208,8 +211,8 @@ export default function App() {
               const imagePaths = post.imageUrls?.filter((p): p is string => !!p) ?? [];
               const imageUrls = await Promise.all(imagePaths.map(resolveS3Url));
 
-              const { data: comments } = await client.models.Comment.listCommentByPostIdAndPostedAt({
-                postId: post.id,
+              const { data: comments } = await client.models.Comment.list({
+                filter: { postId: { eq: post.id } },
               });
 
               const username = postUser?.username ?? "Unknown";
@@ -331,6 +334,7 @@ export default function App() {
               isViraled={viraledPostIds.has(post.id)}
               viralByUsername={post.viralByUsername}
               onPostClick={() => router.push(`/post/${post.id}`)}
+              onCommentClick={() => { setCommentTargetPostId(post.id); setCommentModalOpen(true); }}
               onAvatarClick={() => router.push(`/profile/${post.userId}`)}
               onFavoriteToggle={handleFavoriteToggle}
               onViralToggle={handleViralToggle}
@@ -338,6 +342,13 @@ export default function App() {
           ))}
         </div>
       )}
+
+      <CommentModal
+        isOpen={commentModalOpen}
+        onClose={() => setCommentModalOpen(false)}
+        postId={commentTargetPostId ?? ""}
+        onSuccess={fetchTimeline}
+      />
     </main>
   );
 }

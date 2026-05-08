@@ -7,6 +7,7 @@ import { generateClient } from "aws-amplify/data";
 import { getUrl } from "aws-amplify/storage";
 import type { Schema } from "@/amplify/data/resource";
 import PostContent from "@/app/components/PostContent";
+import CommentModal from "@/app/components/CommentModal";
 import MarkdownContent from "@/app/components/MarkdownContent";
 import { HiArrowLeft } from "react-icons/hi";
 
@@ -35,6 +36,7 @@ type ProfilePost = {
   hashtags: string[];
   favoriteCount: number;
   viralCount: number;
+  commentCount: number;
   ttl?: number | null;
   isProtected: boolean;
   createdAt: string;
@@ -113,6 +115,9 @@ export default function UserProfilePage() {
   const [viralsLoading, setViralsLoading] = useState(false);
   const [viralsLoaded, setViralsLoaded] = useState(false);
   const [currentUserViralIds, setCurrentUserViralIds] = useState<Set<string>>(new Set());
+  const [commentedPostIds, setCommentedPostIds] = useState<Set<string>>(new Set());
+  const [commentModalOpen, setCommentModalOpen] = useState(false);
+  const [commentTargetPostId, setCommentTargetPostId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!userId) return;
@@ -194,6 +199,7 @@ export default function UserProfilePage() {
             hashtags: post.hashtags?.filter((h): h is string => !!h) ?? [],
             favoriteCount: post.favoriteCount ?? 0,
             viralCount: post.viralCount ?? 0,
+            commentCount: post.commentCount ?? 0,
             ttl: post.ttl,
             isProtected: post.isProtected ?? false,
             createdAt: post.createdAt ?? "",
@@ -245,6 +251,7 @@ export default function UserProfilePage() {
           hashtags: post.hashtags?.filter((h): h is string => !!h) ?? [],
           favoriteCount: post.favoriteCount ?? 0,
           viralCount: post.viralCount ?? 0,
+          commentCount: post.commentCount ?? 0,
           ttl: post.ttl,
           isProtected: post.isProtected ?? false,
           createdAt: post.createdAt ?? "",
@@ -292,6 +299,7 @@ export default function UserProfilePage() {
           hashtags: post.hashtags?.filter((h): h is string => !!h) ?? [],
           favoriteCount: post.favoriteCount ?? 0,
           viralCount: post.viralCount ?? 0,
+          commentCount: post.commentCount ?? 0,
           ttl: post.ttl,
           isProtected: post.isProtected ?? false,
           createdAt: post.createdAt ?? "",
@@ -338,6 +346,15 @@ export default function UserProfilePage() {
       fetchVirals();
     }
   }, [activeTab, viralsLoaded, fetchVirals]);
+
+  const handleCommentSuccess = useCallback((postId: string) => {
+    setCommentedPostIds((prev) => new Set(prev).add(postId));
+    const inc = (list: ProfilePost[]) =>
+      list.map((p) => p.id === postId ? { ...p, commentCount: p.commentCount + 1 } : p);
+    setPosts((prev) => inc(prev));
+    setFavoritePosts((prev) => inc(prev));
+    setViralPosts((prev) => inc(prev));
+  }, []);
 
   async function handleFollowToggle() {
     if (!currentUserId || !profile || currentUserId === profile.userId) return;
@@ -566,8 +583,10 @@ export default function UserProfilePage() {
                 createdAt={post.createdAt ? formatRelativeDate(post.createdAt) : undefined}
                 favoriteCount={post.favoriteCount}
                 viralCount={post.viralCount}
+                commentCount={post.commentCount}
                 isFavorited={currentUserFavIds.has(post.id)}
                 isViraled={currentUserViralIds.has(post.id)}
+                isCommented={commentedPostIds.has(post.id)}
                 onFavoriteToggle={currentUserId && !isSelf ? handleFavoriteToggle : undefined}
                 onViralToggle={currentUserId && !isSelf ? handleViralToggle : undefined}
                 deletionScheduledAt={
@@ -579,6 +598,7 @@ export default function UserProfilePage() {
                 }
                 isProtected={post.isProtected}
                 onPostClick={() => router.push(`/post/${post.id}`)}
+                onCommentClick={currentUserId ? () => { setCommentTargetPostId(post.id); setCommentModalOpen(true); } : undefined}
                 onAvatarClick={() => router.push(`/profile/${profile.userId}`)}
               />
             ))}
@@ -610,11 +630,14 @@ export default function UserProfilePage() {
                 createdAt={post.createdAt ? formatRelativeDate(post.createdAt) : undefined}
                 favoriteCount={post.favoriteCount}
                 viralCount={post.viralCount}
+                commentCount={post.commentCount}
                 isFavorited={currentUserFavIds.has(post.id)}
                 isViraled={currentUserViralIds.has(post.id)}
+                isCommented={commentedPostIds.has(post.id)}
                 onFavoriteToggle={currentUserId ? handleFavoriteToggle : undefined}
                 onViralToggle={currentUserId ? handleViralToggle : undefined}
                 onPostClick={() => router.push(`/post/${post.id}`)}
+                onCommentClick={currentUserId ? () => { setCommentTargetPostId(post.id); setCommentModalOpen(true); } : undefined}
                 onAvatarClick={() => router.push(`/profile/${profile.userId}`)}
               />
             ))}
@@ -646,18 +669,28 @@ export default function UserProfilePage() {
                 createdAt={post.createdAt ? formatRelativeDate(post.createdAt) : undefined}
                 favoriteCount={post.favoriteCount}
                 viralCount={post.viralCount}
+                commentCount={post.commentCount}
                 isFavorited={currentUserFavIds.has(post.id)}
                 isViraled={currentUserViralIds.has(post.id)}
+                isCommented={commentedPostIds.has(post.id)}
                 viralByUsername={profile.username}
                 onFavoriteToggle={currentUserId ? handleFavoriteToggle : undefined}
                 onViralToggle={currentUserId ? handleViralToggle : undefined}
                 onPostClick={() => router.push(`/post/${post.id}`)}
+                onCommentClick={currentUserId ? () => { setCommentTargetPostId(post.id); setCommentModalOpen(true); } : undefined}
                 onAvatarClick={() => router.push(`/profile/${profile.userId}`)}
               />
             ))}
           </div>
         )
       )}
+
+      <CommentModal
+        isOpen={commentModalOpen}
+        onClose={() => setCommentModalOpen(false)}
+        postId={commentTargetPostId ?? ""}
+        onSuccess={() => commentTargetPostId && handleCommentSuccess(commentTargetPostId)}
+      />
     </main>
   );
 }

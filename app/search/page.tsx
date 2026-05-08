@@ -7,6 +7,7 @@ import { getUrl } from "aws-amplify/storage";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { Schema } from "@/amplify/data/resource";
 import PostContent from "@/app/components/PostContent";
+import CommentModal from "@/app/components/CommentModal";
 
 const client = generateClient<Schema>();
 
@@ -22,6 +23,7 @@ type SearchPost = {
   hashtags: string[];
   favoriteCount: number;
   viralCount: number;
+  commentCount: number;
   ttl?: number | null;
   isProtected: boolean;
   createdAt: string;
@@ -80,6 +82,8 @@ export default function SearchPage() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [favoritedPostIds, setFavoritedPostIds] = useState<Set<string>>(new Set());
   const [viraledPostIds, setViraledPostIds] = useState<Set<string>>(new Set());
+  const [commentModalOpen, setCommentModalOpen] = useState(false);
+  const [commentTargetPostId, setCommentTargetPostId] = useState<string | null>(null);
 
   function switchMode(next: SearchMode) {
     setMode(next);
@@ -146,12 +150,22 @@ export default function SearchPage() {
           })
         );
 
-        const resolvedImages = await Promise.all(
-          sorted.map(async (post) => {
-            const paths = post.imageUrls?.filter((p): p is string => !!p) ?? [];
-            return Promise.all(paths.map(resolveS3Url));
-          })
-        );
+        const [commentCounts, resolvedImages] = await Promise.all([
+          Promise.all(
+            sorted.map(async (post) => {
+              const { data } = await client.models.Comment.list({
+                filter: { postId: { eq: post.id } },
+              });
+              return data?.length ?? 0;
+            })
+          ),
+          Promise.all(
+            sorted.map(async (post) => {
+              const paths = post.imageUrls?.filter((p): p is string => !!p) ?? [];
+              return Promise.all(paths.map(resolveS3Url));
+            })
+          ),
+        ]);
 
         setPosts(
           sorted.map((post, i) => {
@@ -167,6 +181,7 @@ export default function SearchPage() {
               hashtags: post.hashtags?.filter((h): h is string => !!h) ?? [],
               favoriteCount: post.favoriteCount ?? 0,
               viralCount: post.viralCount ?? 0,
+              commentCount: commentCounts[i],
               ttl: post.ttl,
               isProtected: post.isProtected ?? false,
               createdAt: post.createdAt ?? "",
@@ -311,6 +326,7 @@ export default function SearchPage() {
                 createdAt={post.createdAt ? formatRelativeDate(post.createdAt) : undefined}
                 favoriteCount={post.favoriteCount}
                 viralCount={post.viralCount}
+                commentCount={post.commentCount}
                 deletionScheduledAt={
                   post.isProtected
                     ? null
@@ -322,6 +338,7 @@ export default function SearchPage() {
                 isFavorited={favoritedPostIds.has(post.id)}
                 isViraled={viraledPostIds.has(post.id)}
                 onPostClick={() => router.push(`/post/${post.id}`)}
+                onCommentClick={currentUserId ? () => { setCommentTargetPostId(post.id); setCommentModalOpen(true); } : undefined}
                 onAvatarClick={() => router.push(`/profile/${post.userId}`)}
                 onFavoriteToggle={handleFavoriteToggle}
                 onViralToggle={handleViralToggle}
@@ -330,6 +347,12 @@ export default function SearchPage() {
           </div>
         )
       )}
+
+      <CommentModal
+        isOpen={commentModalOpen}
+        onClose={() => setCommentModalOpen(false)}
+        postId={commentTargetPostId ?? ""}
+      />
     </main>
   );
 }

@@ -7,6 +7,7 @@ import { generateClient } from "aws-amplify/data";
 import type { Schema } from "@/amplify/data/resource";
 import { HiOutlineStar } from "react-icons/hi2";
 import { HiOutlineLightningBolt } from "react-icons/hi";
+import { FaRegComment } from "react-icons/fa";
 
 const client = generateClient<Schema>();
 
@@ -15,6 +16,7 @@ type NotificationItem = {
   senderId: string;
   type: string;
   postId: string;
+  commentId?: string | null;
   isRead: boolean;
   createdAt: string;
   senderName: string;
@@ -71,6 +73,7 @@ export default function NoticePage() {
           senderId: n.senderId,
           type: n.type,
           postId: n.postId,
+          commentId: n.commentId,
           isRead: n.isRead ?? false,
           createdAt: n.createdAt ?? "",
           senderName: senderMap.get(n.senderId) ?? "不明なユーザー",
@@ -109,36 +112,53 @@ export default function NoticePage() {
         <p className="px-4 py-8 text-center text-sm text-gray-400">通知はありません</p>
       ) : (
         <div>
-          {notifications.map((notif) => (
-            <button
-              key={notif.id}
-              onClick={() => router.push(`/post/${notif.postId}`)}
-              className={`w-full text-left px-4 py-4 border-b border-gray-100 hover:bg-gray-50 transition-colors flex items-start gap-3 ${
-                !notif.isRead ? "bg-blue-50/40" : ""
-              }`}
-            >
-              <div className={`mt-0.5 shrink-0 ${notif.type === "VIRAL" ? "text-green-500" : "text-red-400"}`}>
-                {notif.type === "VIRAL"
-                  ? <HiOutlineLightningBolt size={18} />
-                  : <HiOutlineStar size={18} />}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm text-gray-800 break-words">
-                  <span className="font-semibold">{notif.senderName}</span>
-                  {notif.type === "FAVORITE" && " さんがあなたの投稿をお気に入りしました"}
-                  {notif.type === "VIRAL" && " さんがあなたの投稿をバイラルしました"}
-                </p>
-                {notif.createdAt && (
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    {formatRelativeDate(notif.createdAt)}
+          {notifications.map((notif) => {
+            const href = `/post/${notif.postId}`;
+            const isComment =
+              notif.type === "COMMENT" ||
+              notif.type === "COMMENT_REPLY" ||
+              notif.type === "COMMENT_FAVORITE" ||
+              notif.type === "COMMENT_VIRAL";
+            return (
+              <button
+                key={notif.id}
+                onClick={() => router.push(href)}
+                className={`w-full text-left px-4 py-4 border-b border-gray-100 hover:bg-gray-50 transition-colors flex items-start gap-3 ${
+                  !notif.isRead ? "bg-blue-50/40" : ""
+                }`}
+              >
+                <div className={`mt-0.5 shrink-0 ${
+                  notif.type === "VIRAL" || notif.type === "COMMENT_VIRAL" ? "text-green-500"
+                  : isComment ? "text-brand"
+                  : "text-red-400"
+                }`}>
+                  {notif.type === "VIRAL" || notif.type === "COMMENT_VIRAL"
+                    ? <HiOutlineLightningBolt size={18} />
+                    : isComment ? <FaRegComment size={16} />
+                    : <HiOutlineStar size={18} />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-gray-800 break-words">
+                    <span className="font-semibold">{notif.senderName}</span>
+                    {notif.type === "FAVORITE" && " さんがあなたの投稿をお気に入りしました"}
+                    {notif.type === "VIRAL" && " さんがあなたの投稿をバイラルしました"}
+                    {notif.type === "COMMENT" && " さんがあなたの投稿にコメントしました"}
+                    {notif.type === "COMMENT_REPLY" && " さんがあなたのコメントに返信しました"}
+                    {notif.type === "COMMENT_FAVORITE" && " さんがあなたのコメントをお気に入りしました"}
+                    {notif.type === "COMMENT_VIRAL" && " さんがあなたのコメントをバイラルしました"}
                   </p>
+                  {notif.createdAt && (
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      {formatRelativeDate(notif.createdAt)}
+                    </p>
+                  )}
+                </div>
+                {!notif.isRead && (
+                  <span className="mt-1.5 w-2 h-2 rounded-full bg-blue-500 shrink-0" />
                 )}
-              </div>
-              {!notif.isRead && (
-                <span className="mt-1.5 w-2 h-2 rounded-full bg-blue-500 shrink-0" />
-              )}
-            </button>
-          ))}
+              </button>
+            );
+          })}
         </div>
       )}
     </main>
