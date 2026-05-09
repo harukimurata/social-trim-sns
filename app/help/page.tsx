@@ -58,7 +58,7 @@ const helpItems = [
         title: "お気に入りランキングの集計と集計周期",
         content: (
             <div className="text-sm text-body">
-                <p>お気に入りランキングは<strong>定期バッチ処理</strong>で集計・更新されます。リアルタイムには反映されません。</p>
+                <p>お気に入りランキングは<strong>定期処理</strong>で集計・更新されます。</p>
             </div>
         ),
     },
@@ -68,10 +68,59 @@ const helpItems = [
         content: (
             <div className="text-sm text-body space-y-1.5">
                 <p>ハッシュタグのトレンドランキングは<strong>リアルタイム</strong>で更新されます。</p>
-                <p>集計対象は直近の投稿です。</p>
+                <p>集計対象は直近2日間の投稿です。</p>
+                <p className="text-xs text-neutral-secondary">同じハッシュタグを10分以内に連投しても、カウントは1回分のみ加算されます。</p>
             </div>
         ),
-    }
+    },
+    {
+        id: "viral-ranking",
+        title: "バイラルランキングのスコア算出",
+        content: (
+            <div className="text-sm text-body space-y-1.5">
+                <p>バイラルランキングは<strong>コメント・お気に入り・バイラルの複合スコア</strong>で順位が決まります。</p>
+                <p>集計対象は<strong>直近24時間以内に更新された投稿</strong>の上位100件です。</p>
+                <p className="text-xs text-neutral-secondary">ランキングは約10分ごとに更新されます。</p>
+            </div>
+        ),
+    },
+    {
+        id: "comment",
+        title: "コメントと返信",
+        content: (
+            <div className="text-sm text-body space-y-1.5">
+                <p>投稿に対して<strong>コメント</strong>（最大500文字）を投稿できます。</p>
+                <p>コメント・返信にも<strong>お気に入り・バイラル</strong>のリアクションを付けられます。</p>
+            </div>
+        ),
+    },
+    {
+        id: "notification",
+        title: "通知が届くタイミング",
+        content: (
+            <div className="text-sm text-body space-y-1.5">
+                <p>以下のイベントが発生すると通知が届きます。</p>
+                <ul className="list-disc list-inside space-y-1 text-xs text-neutral-secondary">
+                    <li>自分の投稿がお気に入り・バイラルされた</li>
+                    <li>自分の投稿にコメントされた</li>
+                    <li>自分のコメントに返信された</li>
+                    <li>自分のコメントがお気に入り・バイラルされた</li>
+                </ul>
+                <p className="text-xs text-neutral-secondary">自分自身の操作では通知は届きません。通知一覧を開くと、すべて既読になります。</p>
+            </div>
+        ),
+    },
+    {
+        id: "follow",
+        title: "フォローの仕組み",
+        content: (
+            <div className="text-sm text-body space-y-1.5">
+                <p>フォローは<strong>一方向</strong>です。相手の承認なしにフォローできます。</p>
+                <p>フォロー中のユーザーの投稿がタイムラインに表示されます。</p>
+                <p>フォロー・フォロワーの一覧はプロフィール画面から確認できます。</p>
+            </div>
+        ),
+    },
 ];
 
 export default function Help() {

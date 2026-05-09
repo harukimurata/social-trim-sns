@@ -84,13 +84,27 @@ const schema = a.schema({
       allow.authenticated().to(["read"]),
     ]),
 
-  // ハッシュタグ投稿数 (DynamoDB Streams → Lambda が AtomicCounter で更新)
-  HashtagCount: a
+  // ハッシュタグ日次投稿数 (PK=hashtag, SK=dateKey(YYYYMMDD), 直近2日分を集計してランキング表示)
+  // ttl = dateKey の3日後 → 古い日次カウントを自動削除
+  HashtagDailyCount: a
     .model({
       hashtag: a.string().required(),
+      dateKey: a.string().required(),
       count: a.integer().default(0),
+      ttl: a.integer(),
     })
-    .identifier(["hashtag"])
+    .identifier(["hashtag", "dateKey"])
+    .authorization((allow) => [allow.authenticated().to(["read"])]),
+
+  // ハッシュタグ連投対策: ユーザー×ハッシュタグ×時間窓ごとの投稿数追跡
+  // pk = `${hashtag}#${userId}#${windowKey}` (windowKey = floor(unixtime / 600))
+  HashtagUserActivity: a
+    .model({
+      pk: a.string().required(),
+      postCount: a.integer().default(0),
+      ttl: a.integer(),
+    })
+    .identifier(["pk"])
     .authorization((allow) => [allow.authenticated().to(["read"])]),
 
   // ユーザーが作成したリスト
@@ -178,6 +192,17 @@ const schema = a.schema({
       rank: a.integer().required(),
       postId: a.string().required(),
       favoriteCount: a.integer(),
+    })
+    .identifier(["rankingType", "rank"])
+    .authorization((allow) => [allow.authenticated().to(["read"])]),
+
+  // バイラルランキング (commentCount*3 + favoriteCount*1 + viralCount*2, 30分ごとにバッチ更新)
+  ViralRanking: a
+    .model({
+      rankingType: a.string().required(),
+      rank: a.integer().required(),
+      postId: a.string().required(),
+      score: a.integer(),
     })
     .identifier(["rankingType", "rank"])
     .authorization((allow) => [allow.authenticated().to(["read"])]),
