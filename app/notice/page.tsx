@@ -112,7 +112,7 @@ export default function NoticePage() {
         <p className="px-4 py-8 text-center text-sm text-gray-400">通知はありません</p>
       ) : (
         <div>
-          {notifications.map((notif) => {
+          {notifications.map((notif: NotificationItem) => {
             const href = `/post/${notif.postId}`;
             const isComment =
               notif.type === "COMMENT" ||
@@ -123,19 +123,17 @@ export default function NoticePage() {
               <button
                 key={notif.id}
                 onClick={() => router.push(href)}
-                className={`w-full text-left px-4 py-4 border-b border-gray-100 hover:bg-gray-50 transition-colors flex items-start gap-3 ${
-                  !notif.isRead ? "bg-blue-50/40" : ""
-                }`}
+                className={`w-full text-left px-4 py-4 border-b border-gray-100 hover:bg-gray-50 transition-colors flex items-start gap-3 ${!notif.isRead ? "bg-blue-50/40" : ""
+                  }`}
               >
-                <div className={`mt-0.5 shrink-0 ${
-                  notif.type === "VIRAL" || notif.type === "COMMENT_VIRAL" ? "text-green-500"
-                  : isComment ? "text-brand"
-                  : "text-red-400"
-                }`}>
+                <div className={`mt-0.5 shrink-0 ${notif.type === "VIRAL" || notif.type === "COMMENT_VIRAL" ? "text-green-500"
+                    : isComment ? "text-brand"
+                      : "text-red-400"
+                  }`}>
                   {notif.type === "VIRAL" || notif.type === "COMMENT_VIRAL"
                     ? <HiOutlineLightningBolt size={18} />
                     : isComment ? <FaRegComment size={16} />
-                    : <HiOutlineStar size={18} />}
+                      : <HiOutlineStar size={18} />}
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm text-gray-800 break-words">

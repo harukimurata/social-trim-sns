@@ -7,12 +7,16 @@ import { followStreamHandler } from "./functions/follow-stream-handler/resource.
 import { userReactionStreamHandler } from "./functions/user-reaction-stream-handler/resource.js";
 import { commentStreamHandler } from "./functions/comment-stream-handler/resource.js";
 import { commentReactionStreamHandler } from "./functions/comment-reaction-stream-handler/resource.js";
+import { deleteExpiredPosts } from "./functions/delete-expired-posts/resource.js";
+import { viralRankingBatch } from "./functions/viral-ranking-batch/resource.js";
 import { storage } from "./storage/resource.js";
-import { Stack, CfnResource } from "aws-cdk-lib";
+import { Stack, CfnResource, Duration } from "aws-cdk-lib";
 import { Function as LambdaFunction, CfnEventSourceMapping } from "aws-cdk-lib/aws-lambda";
 import { StreamViewType } from "aws-cdk-lib/aws-dynamodb";
 import { StringParameter } from "aws-cdk-lib/aws-ssm";
 import { PolicyStatement } from "aws-cdk-lib/aws-iam";
+import { Rule, Schedule } from "aws-cdk-lib/aws-events";
+import { LambdaFunction as LambdaTarget } from "aws-cdk-lib/aws-events-targets";
 
 const backend = defineBackend({
   auth,
@@ -23,6 +27,8 @@ const backend = defineBackend({
   userReactionStreamHandler,
   commentStreamHandler,
   commentReactionStreamHandler,
+  deleteExpiredPosts,
+  viralRankingBatch,
   storage,
 });
 
@@ -38,6 +44,12 @@ const USER_TABLE_SSM = "/social-trim-sns/user-table-name";
 const POST_TABLE_SSM = "/social-trim-sns/post-table-name";
 const COMMENT_TABLE_SSM = "/social-trim-sns/comment-table-name";
 const NOTIFICATION_TABLE_SSM = "/social-trim-sns/notification-table-name";
+const USER_REACTION_TABLE_SSM = "/social-trim-sns/user-reaction-table-name";
+const COMMENT_REACTION_TABLE_SSM = "/social-trim-sns/comment-reaction-table-name";
+const HASHTAG_DAILY_COUNT_TABLE_SSM = "/social-trim-sns/hashtag-daily-count-table-name";
+const HASHTAG_USER_ACTIVITY_TABLE_SSM = "/social-trim-sns/hashtag-user-activity-table-name";
+const STORAGE_BUCKET_SSM = "/social-trim-sns/storage-bucket-name";
+const VIRAL_RANKING_TABLE_SSM = "/social-trim-sns/viral-ranking-table-name";
 
 new StringParameter(dataStack, "CounterTableNameSsm", {
   parameterName: COUNTER_TABLE_SSM,
@@ -62,6 +74,36 @@ new StringParameter(dataStack, "CommentTableNameSsm", {
 new StringParameter(dataStack, "NotificationTableNameSsm", {
   parameterName: NOTIFICATION_TABLE_SSM,
   stringValue: tables["Notification"].tableName,
+});
+
+new StringParameter(dataStack, "UserReactionTableNameSsm", {
+  parameterName: USER_REACTION_TABLE_SSM,
+  stringValue: tables["UserReaction"].tableName,
+});
+
+new StringParameter(dataStack, "CommentReactionTableNameSsm", {
+  parameterName: COMMENT_REACTION_TABLE_SSM,
+  stringValue: tables["CommentReaction"].tableName,
+});
+
+new StringParameter(dataStack, "HashtagDailyCountTableNameSsm", {
+  parameterName: HASHTAG_DAILY_COUNT_TABLE_SSM,
+  stringValue: tables["HashtagDailyCount"].tableName,
+});
+
+new StringParameter(dataStack, "HashtagUserActivityTableNameSsm", {
+  parameterName: HASHTAG_USER_ACTIVITY_TABLE_SSM,
+  stringValue: tables["HashtagUserActivity"].tableName,
+});
+
+new StringParameter(dataStack, "StorageBucketNameSsm", {
+  parameterName: STORAGE_BUCKET_SSM,
+  stringValue: backend.storage.resources.bucket.bucketName,
+});
+
+new StringParameter(dataStack, "ViralRankingTableNameSsm", {
+  parameterName: VIRAL_RANKING_TABLE_SSM,
+  stringValue: tables["ViralRanking"].tableName,
 });
 
 // ── post-confirmation Lambda ──────────────────────────────────────────────
@@ -96,6 +138,20 @@ const streamLambda = backend.postStreamHandler.resources.lambda as LambdaFunctio
 // Amplify Gen 2 のテーブルは Custom::AmplifyDynamoDBTable カスタムリソース。
 // amplifyDynamoDbTables が公式エスケープハッチ（tables["Post"].node.defaultChild は undefined）。
 const { amplifyDynamoDbTables } = backend.data.resources.cfnResources;
+
+// HashtagDailyCount / HashtagUserActivity の TTL を有効化
+const hashtagDailyCountCfnResource = (amplifyDynamoDbTables["HashtagDailyCount"] as any).resource as CfnResource;
+hashtagDailyCountCfnResource.addPropertyOverride("TimeToLiveSpecification", {
+  AttributeName: "ttl",
+  Enabled: true,
+});
+
+const hashtagUserActivityCfnResource = (amplifyDynamoDbTables["HashtagUserActivity"] as any).resource as CfnResource;
+hashtagUserActivityCfnResource.addPropertyOverride("TimeToLiveSpecification", {
+  AttributeName: "ttl",
+  Enabled: true,
+});
+
 const postTableWrapper = amplifyDynamoDbTables["Post"];
 // NEW_AND_OLD_IMAGES に変更することでカスタムリソースの再実行を強制し、
 // Disabled になったストリームを新しい Enabled ストリームに置き換える。
@@ -114,7 +170,7 @@ new CfnEventSourceMapping(Stack.of(postCfnResource), "PostStreamToLambda", {
   eventSourceArn: postCfnResource.getAtt("TableStreamArn").toString(),
   startingPosition: "LATEST",
   filterCriteria: {
-    filters: [{ pattern: JSON.stringify({ eventName: ["INSERT"] }) }],
+    filters: [{ pattern: JSON.stringify({ eventName: ["INSERT", "REMOVE"] }) }],
   },
 });
 
@@ -134,7 +190,11 @@ streamLambda.addToRolePolicy(
 streamLambda.addToRolePolicy(
   new PolicyStatement({
     actions: ["dynamodb:UpdateItem"],
-    resources: ["arn:aws:dynamodb:*:*:table/User-*"],
+    resources: [
+      "arn:aws:dynamodb:*:*:table/User-*",
+      "arn:aws:dynamodb:*:*:table/HashtagDailyCount-*",
+      "arn:aws:dynamodb:*:*:table/HashtagUserActivity-*",
+    ],
   })
 );
 
@@ -146,6 +206,8 @@ streamLambda.addToRolePolicy(
 );
 
 streamLambda.addEnvironment("USER_TABLE_SSM_PATH", USER_TABLE_SSM);
+streamLambda.addEnvironment("HASHTAG_DAILY_COUNT_TABLE_SSM_PATH", HASHTAG_DAILY_COUNT_TABLE_SSM);
+streamLambda.addEnvironment("HASHTAG_USER_ACTIVITY_TABLE_SSM_PATH", HASHTAG_USER_ACTIVITY_TABLE_SSM);
 
 // ── follow-stream-handler Lambda ──────────────────────────────────────────
 const followStreamLambda = backend.followStreamHandler.resources.lambda as LambdaFunction;
@@ -354,3 +416,96 @@ commentReactionStreamLambda.addToRolePolicy(
 
 commentReactionStreamLambda.addEnvironment("COMMENT_TABLE_SSM_PATH", COMMENT_TABLE_SSM);
 commentReactionStreamLambda.addEnvironment("NOTIFICATION_TABLE_SSM_PATH", NOTIFICATION_TABLE_SSM);
+
+// ── delete-expired-posts Lambda（6時間ごとのスケジュール実行） ────────────
+const deleteExpiredPostsLambda = backend.deleteExpiredPosts.resources.lambda as LambdaFunction;
+
+new Rule(Stack.of(deleteExpiredPostsLambda), "DeleteExpiredPostsSchedule", {
+  schedule: Schedule.rate(Duration.hours(6)),
+  targets: [new LambdaTarget(deleteExpiredPostsLambda)],
+});
+
+deleteExpiredPostsLambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ["dynamodb:Scan"],
+    resources: [
+      "arn:aws:dynamodb:*:*:table/Post-*",
+      "arn:aws:dynamodb:*:*:table/UserReaction-*",
+      "arn:aws:dynamodb:*:*:table/CommentReaction-*",
+      "arn:aws:dynamodb:*:*:table/Notification-*",
+    ],
+  })
+);
+
+deleteExpiredPostsLambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ["dynamodb:Query"],
+    resources: ["arn:aws:dynamodb:*:*:table/Comment-*/index/*"],
+  })
+);
+
+deleteExpiredPostsLambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ["dynamodb:BatchWriteItem", "dynamodb:DeleteItem"],
+    resources: [
+      "arn:aws:dynamodb:*:*:table/Post-*",
+      "arn:aws:dynamodb:*:*:table/Comment-*",
+      "arn:aws:dynamodb:*:*:table/UserReaction-*",
+      "arn:aws:dynamodb:*:*:table/CommentReaction-*",
+      "arn:aws:dynamodb:*:*:table/Notification-*",
+    ],
+  })
+);
+
+deleteExpiredPostsLambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ["ssm:GetParameter"],
+    resources: ["arn:aws:ssm:*:*:parameter/social-trim-sns/*"],
+  })
+);
+
+deleteExpiredPostsLambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ["s3:DeleteObject"],
+    resources: [`${backend.storage.resources.bucket.bucketArn}/*`],
+  })
+);
+
+deleteExpiredPostsLambda.addEnvironment("POST_TABLE_SSM_PATH", POST_TABLE_SSM);
+deleteExpiredPostsLambda.addEnvironment("COMMENT_TABLE_SSM_PATH", COMMENT_TABLE_SSM);
+deleteExpiredPostsLambda.addEnvironment("USER_REACTION_TABLE_SSM_PATH", USER_REACTION_TABLE_SSM);
+deleteExpiredPostsLambda.addEnvironment("COMMENT_REACTION_TABLE_SSM_PATH", COMMENT_REACTION_TABLE_SSM);
+deleteExpiredPostsLambda.addEnvironment("NOTIFICATION_TABLE_SSM_PATH", NOTIFICATION_TABLE_SSM);
+deleteExpiredPostsLambda.addEnvironment("STORAGE_BUCKET_SSM_PATH", STORAGE_BUCKET_SSM);
+
+// ── viral-ranking-batch Lambda（10分ごとのスケジュール実行） ─────────────────
+const viralRankingBatchLambda = backend.viralRankingBatch.resources.lambda as LambdaFunction;
+
+new Rule(Stack.of(viralRankingBatchLambda), "ViralRankingBatchSchedule", {
+  schedule: Schedule.rate(Duration.minutes(10)),
+  targets: [new LambdaTarget(viralRankingBatchLambda)],
+});
+
+viralRankingBatchLambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ["dynamodb:Scan"],
+    resources: ["arn:aws:dynamodb:*:*:table/Post-*"],
+  })
+);
+
+viralRankingBatchLambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ["dynamodb:Query", "dynamodb:BatchWriteItem"],
+    resources: ["arn:aws:dynamodb:*:*:table/ViralRanking-*"],
+  })
+);
+
+viralRankingBatchLambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ["ssm:GetParameter"],
+    resources: ["arn:aws:ssm:*:*:parameter/social-trim-sns/*"],
+  })
+);
+
+viralRankingBatchLambda.addEnvironment("POST_TABLE_SSM_PATH", POST_TABLE_SSM);
+viralRankingBatchLambda.addEnvironment("VIRAL_RANKING_TABLE_SSM_PATH", VIRAL_RANKING_TABLE_SSM);

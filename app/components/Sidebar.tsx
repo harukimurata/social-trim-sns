@@ -35,7 +35,7 @@ const navItems = [
     hideOnTablet: true,
   },
   {
-    href: "/buzz",
+    href: "/viraling",
     label: "バイラリング",
     icon: <SiBuzzfeed className={iconClass} aria-hidden="true" />,
     hideOnTablet: true,
